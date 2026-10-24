@@ -42,6 +42,11 @@ ghq は PATH 上の偽 executable で再現する。public remote、ユーザー
 | NFR-06 出力上限 / UTF-8 / spawn / cancel | runner classifies output limits, invalid UTF-8, spawn failures and cancellation; cancellation propagates through Crust and returns 130 | macOS / Linux |
 | Effect ライフサイクル | official adapter releases the core layer on success / failure / cancel with its Exit（src/runtime.test.ts） | macOS / Linux |
 
+## Issue #10 / #11 / #12: scan・list・inspect
+
+- `src/commands/commands.test.ts`: 各コマンドで拒否するフラグ・`--status` の空値/未知値/重複、対象解決・設定失敗の終了2とJSON errors、列挙失敗1、DIRTY/PROTECTEDのみ・0件は0、診断件数と表示件数のtext表示、inspectのsource表示、130を検証。
+- `src/commands/diagnostics.test.ts`: 実Gitと偽ghqで、引数なし/scan/--ghqの同一性、複数ルート、DIR直下のみ、DIR+--ghq拒否、混在4状態と個別失敗、空一覧とghq失敗の区別、設定エラー、list の各status・該当なし・隠れたUNKNOWNの終了1・再診断、inspect のNAME完全一致・曖昧名・不一致・絶対/./ ../パス・子フォルダ拒否・欠損/壊れた.git/PATH_SYMLINK、全理由のtext/JSON、元repo不変と状態領域未作成を検証。
+
 ## Issue #6: 退避・復元と操作記録
 
 | 要件 | テスト | OS |

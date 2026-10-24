@@ -216,6 +216,7 @@ export const applicationLive = (
 												].includes(error.message)
 											? error.message
 											: "DISCOVERY_FAILED",
+								detail: error instanceof UsageError ? error.message : undefined,
 							}),
 					),
 				);

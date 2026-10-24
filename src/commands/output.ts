@@ -52,6 +52,12 @@ export function present(batch: Batch, invocation: Invocation) {
 		: [
 				...repositories.flatMap((repo) => [
 					`${repo.status} ${JSON.stringify(repo.path)}`,
+					...(invocation.operation === "inspect"
+						? [
+								`  Source: ${repo.source}; root: ${JSON.stringify(repo.root)}; name: ${JSON.stringify(repo.name)}`,
+								`  Checked at: ${repo.checked_at}`,
+							]
+						: []),
 					`  Logical bytes (estimate): ${repo.metadata.size_bytes ?? "unknown"}; last commit: ${repo.metadata.last_commit_at ?? "unknown"}`,
 					...(repo.metadata.metadata_errors ?? []).map((error) => `  ${error}`),
 					...repo.reasons.map(

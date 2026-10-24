@@ -18,6 +18,15 @@ interface IO {
 	readonly stderr: (text: string) => void;
 }
 
+const failureMessages: Record<string, string> = {
+	SERVICE_NOT_CONNECTED: "Required application service is unavailable.",
+	GHQ_NOT_FOUND: "ghq was not found; install ghq or specify a directory.",
+	GHQ_TIMEOUT: "ghq timed out while listing repositories.",
+	GHQ_COMMAND_FAILED: "ghq failed while listing repositories.",
+	DISCOVERY_FAILED: "Repository enumeration failed.",
+	CONFIG_OR_TARGET_ERROR: "Invalid configuration or target.",
+};
+
 export async function runCli(
 	argv: readonly string[],
 	io: IO,
@@ -67,7 +76,10 @@ export async function runCli(
 							errors: [
 								{
 									code: error.code,
-									message: "Required application service is unavailable.",
+									message:
+										error.detail ??
+										failureMessages[error.code] ??
+										"Diagnosis failed.",
 								},
 							],
 						};

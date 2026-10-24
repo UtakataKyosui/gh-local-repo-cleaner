@@ -72,6 +72,34 @@ export const discover = (invocation: Invocation) =>
 				invocation.target.startsWith("../"))
 		) {
 			const path = resolve(invocation.target);
+			const worktreeRoot = yield* Effect.tryPromise(async () => {
+				let stat: Awaited<ReturnType<typeof lstat>>;
+				try {
+					stat = await lstat(path);
+				} catch {
+					return true; // Missing or inaccessible: diagnosed as UNKNOWN.
+				}
+				if (stat.isSymbolicLink()) return true;
+				if (!stat.isDirectory()) return false;
+				try {
+					await lstat(join(path, ".git"));
+					return true;
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
+				}
+				try {
+					return (
+						(await lstat(join(path, "HEAD"))).isFile() &&
+						(await lstat(join(path, "objects"))).isDirectory()
+					);
+				} catch {
+					return false;
+				}
+			});
+			if (!worktreeRoot)
+				throw new UsageError(
+					"Path is not a Git worktree root; specify the repository root itself",
+				);
 			return [
 				{
 					source: "directory" as const,
@@ -164,8 +192,14 @@ export const discover = (invocation: Invocation) =>
 			const matches = repositories.filter(
 				(repo) => repo.name === invocation.target,
 			);
-			if (matches.length !== 1)
-				throw new UsageError("Repository name is missing or ambiguous");
+			if (matches.length === 0)
+				throw new UsageError(
+					`No ghq repository is named ${JSON.stringify(invocation.target)}; use an absolute path, ./ or ../ for other repositories`,
+				);
+			if (matches.length > 1)
+				throw new UsageError(
+					`Repository name ${JSON.stringify(invocation.target)} is ambiguous across ghq roots (${matches.map((repo) => JSON.stringify(repo.path)).join(", ")}); specify an absolute path`,
+				);
 			return matches;
 		}
 		return repositories;
