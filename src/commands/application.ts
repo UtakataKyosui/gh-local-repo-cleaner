@@ -70,7 +70,12 @@ export async function runCli(
 								{
 									code: error.code,
 									message:
-										error.detail ?? failureMessage(invocation.lang, error.code),
+										error.code === "CONFIG_OR_TARGET_ERROR" &&
+										error.detail &&
+										!invocation.json
+											? localizeUsage(invocation.lang, error.detail)
+											: (error.detail ??
+												failureMessage(invocation.lang, error.code)),
 								},
 							],
 						};
