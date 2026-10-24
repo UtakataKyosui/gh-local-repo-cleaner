@@ -53,6 +53,8 @@ gh local-repo-cleaner restore <id>
 
 `inspect` の管理名は ghq 一覧の完全一致です。絶対パス、`./`、`../` 始まりは
 個別パスとして扱います。`--ghq` とディレクトリ指定の併用はできません。
+存在しない、またはディレクトリでない DIR は引数エラー（終了2）、
+存在しても読めない DIR は列挙失敗（終了1）です。
 
 ## 状態と手動対処
 
@@ -127,7 +129,9 @@ remote変更は `REMOTE_CHANGED_DURING_SCAN`、検証失敗は `REMOTE_VERIFICAT
 認証対話を禁止しtimeoutを適用します。`checked_at` は検証時点であり、その後のremote変更は保証しません。
 
 終了値は `0`=完了（DIRTY / PROTECTED / 拒否を含む）、`1`=UNKNOWN または操作失敗、
-`2`=引数・設定エラー、`130`=キャンセルです。
+`2`=引数・設定エラー、`130`=キャンセル（Ctrl-C）です。
+移動・復元の実行中に Ctrl-C を受けた場合は、その1件の移動と記録更新を完了して整合させてから
+130 で終了し、以降の対象は処理しません。
 外部プロセスは shell を使わず argv 配列で実行し、Git は既定60秒、ghq は30秒、
 stdout は16 MiBを上限とします。生の stderr や認証 URL をエラー表示しません。
 外部の `GIT_DIR` / `GIT_WORK_TREE` / index / object / 設定注入環境は持ち込みません。
@@ -176,11 +180,16 @@ root と各 entry は 0700、`key` と `record.json` は 0600 です。所有者
 | `invalid_record` / `orphan_entry` | 記録の破損・改ざん・権限不正／記録のない entry |
 
 `recoverable` / `recovery_required` / `invalid_record` / `orphan_entry` があると終了値は 1 です。
+state root が存在しなければ 0 件・終了0で何も作成しません。読み取り権限などで読めない場合は
+空一覧とは区別して終了1とし、読めない record は `invalid_record` として他の履歴は表示します。
+表示中に store が変化した場合は結果を信頼せず、再実行を案内して終了1とします。
 
 `restore <id>` は ID 形式、所有者、記録、退避実体、親パスに symlink がないことを検証します。
 復元先に何か（dangling symlink を含む）が存在する場合、または元の親ディレクトリがない場合は
 拒否し、親を再作成しません。復元は確認または `--yes` の後に、上書きしない rename で行います。
 ネットワーク検証は行わないので DIRTY なリポジトリも復元できます。
+存在しない ID は終了1、既に `restored` の ID は再移動せず履歴を示して終了1です。
+EXDEV などで移動に失敗した場合は `restoring` の `recoverable` として残り、原因を解消して再度 `restore` できます。
 `recovery_required` の entry は復元せず、次の手順で調べます。
 
 1. 他の clean / restore が動いていないことを確認する。

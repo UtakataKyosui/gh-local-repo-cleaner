@@ -747,3 +747,177 @@ test("clean -> trash list -> restore round trip keeps .git, contents, config and
 		"preserved\n",
 	);
 });
+
+test("trash list does not call a store that changes while it is read reliable", async () => {
+	const f = await setup();
+	const first = await f.repository("a-first");
+	const second = await f.repository("b-second");
+	await f.moveRepo(first.path);
+	const stable = await f.run("trash", "list", "--state-dir", f.store);
+	expect(stable.code).toBe(0);
+	expect(stable.stdout).not.toContain("Run trash list again");
+
+	const changing = await setup(
+		nonInteractive,
+		(path) =>
+			new TrashStore(
+				path,
+				undefined,
+				undefined,
+				undefined,
+				async () => void (await f.moveRepo(second.path)),
+			),
+	);
+	const result = await changing.run("trash", "list", "--state-dir", f.store);
+	expect(result.code).toBe(1);
+	expect(result.stdout).toContain("Run trash list again");
+	expect(result.stderr).toContain("RECOVERY_REQUIRED");
+	const settled = await f.run("trash", "list", "--state-dir", f.store);
+	expect(settled.code).toBe(0);
+	expect(settled.stdout).toContain("2 entries; 0 need attention.");
+	expect(settled.stdout).not.toContain("Run trash list again");
+
+	const store = new TrashStore(
+		f.store,
+		undefined,
+		undefined,
+		undefined,
+		async () => {
+			const [entry] = (await readdir(join(f.store, "entries"))).sort();
+			await rename(
+				join(f.store, "entries", entry ?? "", "repo"),
+				join(f.base, "taken"),
+			);
+		},
+	);
+	expect(await store.list()).toMatchObject({ unstable: true, failed: true });
+});
+
+test.skipIf(process.getuid?.() === 0)(
+	"trash list reports unreadable records and an unreadable store as access failures",
+	async () => {
+		const f = await setup();
+		const good = await f.repository("a-good");
+		const locked = await f.repository("b-locked");
+		await f.moveRepo(good.path);
+		const lockedId = await f.moveRepo(locked.path);
+		const record = join(f.store, "entries", lockedId, "record.json");
+		const entries = join(f.store, "entries");
+		try {
+			await chmod(record, 0o000);
+			const partial = await f.run("trash", "list", "--state-dir", f.store);
+			expect(partial.code).toBe(1);
+			expect(partial.stdout).toContain(`${lockedId} invalid_record`);
+			expect(partial.stdout).toContain("2 entries; 1 need attention.");
+			await chmod(record, 0o600);
+			await chmod(entries, 0o000);
+			const denied = await f.run("trash", "list", "--state-dir", f.store);
+			expect(denied.code).toBe(1);
+			expect(denied.stderr).toContain("history is unknown");
+			expect(denied.stdout).not.toContain("Trash is empty.");
+		} finally {
+			await chmod(record, 0o600).catch(() => {});
+			await chmod(entries, 0o700);
+		}
+	},
+);
+
+test("an abort during the move waits for it, leaves a finalized record and exits 130", async () => {
+	const controller = new AbortController();
+	const f = await setup(
+		nonInteractive,
+		(path) =>
+			new TrashStore(path, async (from, to) => {
+				controller.abort();
+				await new Promise((resolve) => setTimeout(resolve, 50));
+				await rename(from, to);
+			}),
+	);
+	const first = await f.repository("a-first");
+	const second = await f.repository("b-second");
+	const result = await f.runWith(
+		controller.signal,
+		"clean",
+		f.root,
+		"--yes",
+		"--state-dir",
+		f.store,
+	);
+	expect(result.code).toBe(130);
+	expect(await lstat(first.path).catch(() => null)).toBeNull();
+	expect(await lstat(second.path)).toBeDefined();
+	const listed = await new TrashStore(f.store).list();
+	expect(listed.entries.map((entry) => entry.status)).toEqual(["moved"]);
+	expect(listed.failed).toBe(false);
+	await (await new TrashStore(f.store).open()).close();
+});
+
+test("an abort during restore waits for the move and leaves a restored record", async () => {
+	const controller = new AbortController();
+	const base = await setup();
+	const repo = await base.repository("restoring");
+	const id = await base.moveRepo(repo.path);
+	const f = await setup(
+		nonInteractive,
+		(path) =>
+			new TrashStore(path, async (from, to) => {
+				controller.abort();
+				await new Promise((resolve) => setTimeout(resolve, 50));
+				await rename(from, to);
+			}),
+	);
+	const result = await f.runWith(
+		controller.signal,
+		"restore",
+		id,
+		"--yes",
+		"--state-dir",
+		base.store,
+	);
+	expect(result.code).toBe(130);
+	expect(await readFile(join(repo.path, "tracked"), "utf8")).toBe(
+		"preserved\n",
+	);
+	const listed = await new TrashStore(base.store).list();
+	expect(listed.entries.map((entry) => entry.status)).toEqual(["restored"]);
+	await (await new TrashStore(base.store).open()).close();
+});
+
+test("a restore interrupted by EXDEV can be restored again", async () => {
+	const base = await setup();
+	const repo = await base.repository("again");
+	const id = await base.moveRepo(repo.path);
+	const failing = await setup(
+		nonInteractive,
+		(path) => new TrashStore(path, exdev),
+	);
+	const failed = await failing.run(
+		"restore",
+		id,
+		"--yes",
+		"--state-dir",
+		base.store,
+	);
+	expect(failed.code).toBe(1);
+	expect(failed.stderr).toContain(`MOVE_FAILED ${id}`);
+	expect(await lstat(repo.path).catch(() => null)).toBeNull();
+	const [entry] = (await new TrashStore(base.store).list()).entries;
+	expect(entry).toMatchObject({ recorded: "restoring", status: "recoverable" });
+	const listed = await base.run("trash", "list", "--state-dir", base.store);
+	expect(listed.stdout).toContain(`restore ${id}`);
+
+	const again = await base.run(
+		"restore",
+		id,
+		"--yes",
+		"--state-dir",
+		base.store,
+	);
+	expect(again.code).toBe(0);
+	expect(await readFile(join(repo.path, "tracked"), "utf8")).toBe(
+		"preserved\n",
+	);
+	expect((await new TrashStore(base.store).list()).entries[0]?.status).toBe(
+		"restored",
+	);
+});

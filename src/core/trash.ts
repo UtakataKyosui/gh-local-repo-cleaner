@@ -120,6 +120,7 @@ export class TrashStore {
 		private readonly beforeSave: (
 			status: string,
 		) => Promise<void> = async () => {},
+		private readonly duringList: () => Promise<void> = async () => {},
 	) {
 		if (!isAbsolute(path) || resolve(path) !== path)
 			throw new Error("Invalid state path");
@@ -342,6 +343,7 @@ export class TrashStore {
 			return { entries: [], failed: false, unstable: false };
 		const before = await this.fingerprint();
 		const result = await this.collect();
+		await this.duringList();
 		const unstable = (await this.fingerprint()) !== before;
 		return {
 			entries: result.entries,

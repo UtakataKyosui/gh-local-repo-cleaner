@@ -427,3 +427,32 @@ test("inspect text and JSON keep every reason with its manual action", async () 
 		expect(text).toContain(reason.action);
 	}
 });
+
+test("a missing or non-directory DIR is an argument error, an unreadable one an enumeration failure", async () => {
+	const f = await setup();
+	await f.ghq([f.root], []);
+	const file = join(f.base, "plain-file");
+	await writeFile(file, "x");
+	for (const target of [join(f.base, "absent"), file]) {
+		for (const command of ["scan", "list"]) {
+			const result = await f.run(command, target, "--json");
+			expect(result.code).toBe(2);
+			expect(result.json().errors[0].code).toBe("CONFIG_OR_TARGET_ERROR");
+			expect(result.json().repositories).toEqual([]);
+		}
+		const clean = await f.run("clean", target, "--dry-run");
+		expect(clean.code).toBe(2);
+		expect(clean.stderr).toContain("Directory does not exist");
+	}
+	if (process.getuid?.() === 0) return;
+	const locked = join(f.base, "locked");
+	await mkdir(locked);
+	await chmod(locked, 0o000);
+	try {
+		const result = await f.run("scan", locked, "--json");
+		expect(result.code).toBe(1);
+		expect(result.json().errors[0].code).toBe("DISCOVERY_FAILED");
+	} finally {
+		await chmod(locked, 0o700);
+	}
+});

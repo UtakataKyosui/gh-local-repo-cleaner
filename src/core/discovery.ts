@@ -29,7 +29,16 @@ export const discover = (invocation: Invocation) =>
 		const runner = yield* CommandRunner;
 		if (invocation.target && invocation.operation !== "inspect") {
 			const root = resolve(invocation.target);
-			const names = yield* Effect.tryPromise(() => readdir(root));
+			const listing = yield* Effect.tryPromise(() =>
+				readdir(root).catch((error: NodeJS.ErrnoException) =>
+					["ENOENT", "ENOTDIR"].includes(error.code ?? "")
+						? null
+						: Promise.reject(error),
+				),
+			);
+			if (!listing)
+				throw new UsageError("Directory does not exist or is not a directory");
+			const names = listing;
 			const repositories: Repository[] = [];
 			for (const name of names.sort()) {
 				const path = join(root, name);
