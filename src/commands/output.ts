@@ -1,9 +1,9 @@
 import type { Batch } from "../model/assessment.ts";
 import type { Invocation } from "./arguments.ts";
-import { reasonAction, reasonDetail, text } from "./messages.ts";
+import { formatSize, humanOutput } from "./human-output.ts";
+import { text } from "./messages.ts";
 
 const otherGroup = "Other";
-const detailLimit = 5;
 const statuses = ["safe", "dirty", "protected", "unknown"] as const;
 
 const palette = {
@@ -97,79 +97,25 @@ export function present(batch: Batch, invocation: Invocation, color = false) {
 					: summary,
 				errors: batch.errors,
 			})
-		: [
-				...repositories.flatMap((repo, index) => [
-					...(invocation.groupBy &&
-					groupName(repo) !== groupName(repositories[index - 1])
-						? [
-								paint(
-									palette.bold,
-									`== ${groupName(repo)} (${statuses
-										.map(
-											(status) =>
-												`${status.toUpperCase()} ${groups.get(groupName(repo) as string)?.[status] ?? 0}`,
-										)
-										.join("; ")}) ==`,
-								),
-							]
-						: []),
-					`${paintStatus(repo.status)} ${JSON.stringify(repo.path)}`,
-					...(invocation.operation === "inspect"
-						? [
-								labels.source(
-									repo.source,
-									JSON.stringify(repo.root),
-									JSON.stringify(repo.name),
-								),
-								labels.checkedAt(repo.checked_at),
-							]
-						: []),
-					paint(
-						palette.dim,
-						labels.repository(
-							repo.metadata.size_bytes,
-							repo.metadata.last_commit_at,
+		: humanOutput(
+				shown,
+				invocation,
+				[
+					labels.totals(
+						summary.scanned,
+						summary.returned,
+						statuses.map(
+							(status) =>
+								`${paintStatus(status.toUpperCase() as keyof typeof palette)} ${summary[status]}`,
 						),
 					),
-					...(repo.metadata.metadata_errors ?? []).map((error) =>
-						paint(palette.UNKNOWN, `  ${error}`),
-					),
-					...Map.groupBy(repo.reasons, (reason) => reason.code)
-						.values()
-						.flatMap((group) => {
-							const [first] = group;
-							if (!first) return [];
-							const details = group.flatMap(
-								(reason) => reasonDetail(invocation.lang, reason) ?? [],
-							);
-							return [
-								`  ${paint(palette[repo.status], first.code)}${details.length ? ` (${details.length})` : ""}`,
-								...details
-									.slice(0, detailLimit)
-									.map((detail) => `    - ${detail}`),
-								...(details.length > detailLimit
-									? [labels.more(details.length - detailLimit)]
-									: []),
-								`    → ${reasonAction(invocation.lang, first)}`,
-							];
-						}),
-				]),
-				paint(
-					palette.dim,
-					labels.safeSize(
-						summary.safe_size_bytes_estimate,
-						summary.safe_size_unknown_count,
-					),
-				),
-				labels.totals(
-					summary.scanned,
-					summary.returned,
-					statuses.map(
-						(status) =>
-							`${paintStatus(status.toUpperCase() as keyof typeof palette)} ${summary[status]}`,
-					),
-				),
-			].join("\n");
+					invocation.lang === "ja"
+						? `退避候補: ${summary.safe}件 / 論理サイズ概算: ${formatSize(summary.safe_size_bytes_estimate, true)}; サイズ不明: ${summary.safe_size_unknown_count}件`
+						: `Candidates: ${summary.safe}; Logical bytes (estimate): ${formatSize(summary.safe_size_bytes_estimate, false)}; unknown sizes: ${summary.safe_size_unknown_count}`,
+				],
+				color,
+			);
+
 	return {
 		stdout,
 		stderr: batch.errors

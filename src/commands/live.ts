@@ -107,7 +107,11 @@ export const applicationLive = (
 											"--no-walk",
 											"--format=%ct",
 											"--branches",
-											"HEAD",
+											...(!reasons.some(
+												(reason) => reason.code === "UNBORN_HEAD",
+											)
+												? ["HEAD"]
+												: []),
 										],
 									})
 									.pipe(
@@ -122,9 +126,17 @@ export const applicationLive = (
 												throw new Error("Invalid timestamp");
 											return new Date(Math.max(...times) * 1000).toISOString();
 										}),
-										Effect.catchDefect(() => Effect.succeed(null)),
-										Effect.catch(() => Effect.succeed(null)),
+										Effect.catchDefect(() => Effect.succeed(undefined)),
+										Effect.catch(() => Effect.succeed(undefined)),
 									);
+								const commitStatus: NonNullable<
+									Assessment["metadata"]["last_commit_status"]
+								> =
+									date === undefined
+										? "unavailable"
+										: date === null
+											? "none"
+											: "available";
 								const result = diagnose(repository.path, reasons);
 								return {
 									repository,
@@ -133,14 +145,17 @@ export const applicationLive = (
 									checked_at: now(),
 									metadata: {
 										size_bytes: size,
-										last_commit_at: date,
+										last_commit_at: date ?? null,
+										last_commit_status: commitStatus,
 										language: language ?? null,
 										metadata_errors: [
 											...(size === null ? ["SIZE_UNAVAILABLE"] : []),
 											...(language === undefined
 												? ["LANGUAGE_UNAVAILABLE"]
 												: []),
-											...(date === null ? ["LAST_COMMIT_UNAVAILABLE"] : []),
+											...(commitStatus === "unavailable"
+												? ["LAST_COMMIT_UNAVAILABLE"]
+												: []),
 										],
 									},
 									snapshot: inspected.snapshot,

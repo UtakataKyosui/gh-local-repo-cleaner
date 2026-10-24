@@ -147,7 +147,7 @@ test("JSON contract excludes snapshots and filters display without hiding UNKNOW
 	expect(result.exitCode).toBe(1);
 });
 
-test("text output groups findings by code, lists branches, truncates long lists and prints each action once", () => {
+test("inspect preserves every ref and scan summarizes refs without summing commits", () => {
 	const branches = ["a", "b", "c", "d", "e", "f", "g"];
 	const batch: Batch = {
 		assessments: [
@@ -168,20 +168,24 @@ test("text output groups findings by code, lists branches, truncates long lists 
 		],
 		errors: [],
 	};
-	const english = present(batch, normalizeArguments(["scan"])).stdout;
-	expect(english).toContain(
-		"  UPSTREAM_MISSING (7)\n    - a\n    - b\n    - c\n    - d\n    - e\n    - ... and 2 more\n    → Configure and verify upstreams for every local branch.",
-	);
-	expect(english).toContain(
-		"  UNPUSHED_COMMITS (1)\n    - a: 4 unpreserved commits\n    → ",
-	);
+	const scan = present(batch, normalizeArguments(["scan"])).stdout;
+	expect(scan).toContain("upstream missing (7 refs)");
+	expect(scan).toContain("unpushed commits (1 refs)");
+	expect(scan).not.toContain("8 unpreserved commits");
+	const english = present(
+		batch,
+		normalizeArguments(["inspect", "/test/a"]),
+	).stdout;
+	expect(english).toContain("[DIRTY] UNPUSHED_COMMITS (1 refs)");
+	expect(english).toContain('"a: 4 unpreserved commits"');
+	expect(english).toContain('    - "g"');
 	expect(english.split("Configure and verify upstreams").length).toBe(2);
 	const japanese = present(
 		batch,
-		normalizeArguments(["scan", "--lang", "ja"]),
+		normalizeArguments(["inspect", "/test/a", "--lang", "ja"]),
 	).stdout;
-	expect(japanese).toContain("    - …ほか 2 件");
-	expect(japanese).toContain("    - a: 未保全コミット 4 件");
+	expect(japanese).toContain("未保全コミット 4 件");
+	expect(japanese).toContain("未保全ref");
 	const json = JSON.parse(
 		present(batch, normalizeArguments(["scan", "--json"])).stdout,
 	);
@@ -201,10 +205,8 @@ test("--lang ja translates labels and actions while codes, statuses and JSON sta
 		batch,
 		normalizeArguments(["scan", "--lang", "ja"]),
 	).stdout;
-	expect(japanese).toContain('UNKNOWN "/test/a"');
-	expect(japanese).toContain(
-		"  LOCAL_INSPECTION_FAILED\n    → 検査の失敗を解消して",
-	);
+	expect(japanese).toContain('"a" [UNKNOWN]');
+	expect(japanese).toContain("ローカル検査失敗");
 	expect(japanese).toContain("検査 1 件; 表示 1 件; SAFE 0");
 	expect(japanese).not.toContain("Scanned");
 	const json = JSON.parse(
@@ -291,9 +293,9 @@ test("--group-by language sorts by language, puts unknown last and adds per-lang
 		normalizeArguments(["scan", "--group-by", "language"]),
 	).stdout.split("\n");
 	expect(text.filter((line) => line.startsWith("=="))).toEqual([
-		"== Go (SAFE 0; DIRTY 0; PROTECTED 0; UNKNOWN 1) ==",
-		"== Rust (SAFE 2; DIRTY 0; PROTECTED 0; UNKNOWN 0) ==",
-		"== Other (SAFE 1; DIRTY 0; PROTECTED 0; UNKNOWN 0) ==",
+		'== "Go" (SAFE 0; DIRTY 0; PROTECTED 0; UNKNOWN 1) ==',
+		'== "Rust" (SAFE 2; DIRTY 0; PROTECTED 0; UNKNOWN 0) ==',
+		'== "Other" (SAFE 1; DIRTY 0; PROTECTED 0; UNKNOWN 0) ==',
 	]);
 	const json = JSON.parse(
 		present(
@@ -305,9 +307,7 @@ test("--group-by language sorts by language, puts unknown last and adds per-lang
 	expect(json.repositories[0].metadata.language).toBe("Go");
 	const ungrouped = present(batch, normalizeArguments(["scan"])).stdout;
 	expect(ungrouped).not.toContain("==");
-	expect(ungrouped.indexOf("/test/a")).toBeLessThan(
-		ungrouped.indexOf("/test/b"),
-	);
+	expect(ungrouped.indexOf('"a" [')).toBeLessThan(ungrouped.indexOf('"b" ['));
 });
 
 test("Crust dispatches normalized argv via official Effect service and separates output", async () => {
@@ -563,4 +563,69 @@ test("progress gauge draws a bar and clears the line on finish", () => {
 	expect(writes[0]).toContain("1/2 (50%)");
 	progress.finish();
 	expect(writes.at(-1)).toBe("\r\x1b[2K");
+});
+
+test("scan renders every repository under its root, escapes names and keeps summary before tree", () => {
+	const make = (root: string, name: string): Assessment => ({
+		...assessment(`${root}/${name}`, "PROTECTED"),
+		repository: { source: "ghq", root, path: `${root}/${name}`, name },
+		reasons: [
+			finding("NO_REMOTE"),
+			finding("REMOTE_MISSING"),
+			finding("ONLINE_NOT_VERIFIED"),
+			finding("LOCAL_CHANGES"),
+			finding("WORKTREE_PRESENT"),
+			finding("IGNORED_FILES"),
+			finding("STASH_PRESENT"),
+		],
+		metadata: {
+			size_bytes: 120 * 1024 ** 2,
+			last_commit_at: null,
+			last_commit_status: "none",
+			language: null,
+		},
+	});
+	const batch: Batch = {
+		assessments: [
+			make("/one", "github.com/owner/日本語"),
+			make("/two", "github.com/owner/日本語"),
+			make("/two", `${"long".repeat(100)}\n\x1b[31m\u202e`),
+		],
+		errors: [],
+	};
+	const result = present(batch, normalizeArguments(["scan", "--lang", "ja"]));
+	expect(result.stdout.indexOf("検査 3")).toBeLessThan(
+		result.stdout.indexOf('"/one" /'),
+	);
+	expect(result.stdout).toContain(
+		'"/one" /\n└── "github.com"/\n    └── "owner"/\n        └── "日本語" [PROTECTED] 120 MiB',
+	);
+	expect(result.stdout).toContain('"/two" /');
+	expect(result.stdout.match(/\[PROTECTED\]/g)).toHaveLength(3);
+	expect(result.stdout).toContain("\\n\\u001b[31m\\u202e");
+	expect(result.stdout).not.toContain("\x1b");
+	expect(result.stdout).toContain(
+		"リモート未設定 · 作業変更あり · worktreeあり · ほか2種類の理由",
+	);
+	expect(result.stdout).not.toContain("オンライン未検証");
+	expect(result.stdout).toEndWith(
+		"詳細: inspect <リポジトリ>\n全データ: scan --json",
+	);
+	const list = present(batch, normalizeArguments(["list"])).stdout;
+	expect(
+		list.split("\n").filter((line) => line.includes("[PROTECTED]")),
+	).toHaveLength(3);
+	expect(list).toContain('"/one/github.com/owner/日本語"');
+	const inspect = present(
+		{ assessments: batch.assessments.slice(0, 1), errors: [] },
+		normalizeArguments([
+			"inspect",
+			"/one/github.com/owner/日本語",
+			"--lang",
+			"ja",
+		]),
+	).stdout;
+	expect(inspect).toContain("最終コミット: コミットなし");
+	expect(inspect).toContain("REMOTE_MISSING");
+	expect(inspect).toContain("ONLINE_NOT_VERIFIED");
 });

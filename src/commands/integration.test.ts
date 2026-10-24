@@ -663,9 +663,17 @@ test("metadata uses maximum branch/HEAD committer date, reports nulls, and text 
 	const emptyJson = JSON.parse((await f.run("inspect", empty, "--json")).stdout)
 		.repositories[0];
 	expect(emptyJson.metadata.last_commit_at).toBeNull();
-	expect(emptyJson.metadata.metadata_errors).toContain(
+	expect(emptyJson.metadata.last_commit_status).toBe("none");
+	expect(emptyJson.metadata.metadata_errors).not.toContain(
 		"LAST_COMMIT_UNAVAILABLE",
 	);
+	// An unborn HEAD can still have other local branches with commits.
+	await f.git(empty, "fetch", repo.path, "HEAD");
+	await f.git(empty, "update-ref", "refs/heads/saved", "FETCH_HEAD");
+	const saved = JSON.parse((await f.run("inspect", empty, "--json")).stdout)
+		.repositories[0];
+	expect(saved.metadata.last_commit_status).toBe("available");
+	expect(saved.metadata.last_commit_at).not.toBeNull();
 });
 
 test("metadata date failure leaves a verified repository SAFE and JSON reports null/error", async () => {
@@ -693,6 +701,7 @@ test("metadata date failure leaves a verified repository SAFE and JSON reports n
 	expect(code).toBe(0);
 	expect(json.repositories[0].status).toBe("SAFE");
 	expect(json.repositories[0].metadata.last_commit_at).toBeNull();
+	expect(json.repositories[0].metadata.last_commit_status).toBe("unavailable");
 	expect(json.repositories[0].metadata.metadata_errors).toEqual([
 		"LAST_COMMIT_UNAVAILABLE",
 	]);
