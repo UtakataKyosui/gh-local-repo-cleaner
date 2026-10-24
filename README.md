@@ -225,8 +225,28 @@ CI artifacts の `distribution/` には raw binary、全隣接 asset 入り tar.
 `SHA256SUMS` を格納し、manifest も保存します。raw binary 名は
 `gh-local-repo-cleaner-linux-amd64` / `gh-local-repo-cleaner-linux-arm64` / `gh-local-repo-cleaner-darwin-arm64` です。
 [GitHub の拡張仕様](https://docs.github.com/en/github-cli/github-cli/creating-github-cli-extensions)
-に従い、将来の Release に添付する場合は OS-ARCH の名前を使います。
-現在はリリース・npm publish を自動実行しません。
+に従い、Release に添付する asset は OS-ARCH の名前を使います。
+npm publish は自動実行しません。
+
+## リリースと導入
+
+`v1.2.3` や `v1.2.3-rc.1` のような tag を push すると、`.github/workflows/release.yml` が
+Check ワークフローを再利用して品質チェック・テスト・3環境のビルドと配布検証を行い、
+すべて成功した場合だけ GitHub Release を作成します。
+Release には raw binary 3種と `SHA256SUMS` を添付し、ノートは自動生成します。
+`-` を含む tag は prerelease になります。
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+公開後は次のコマンドで導入・更新できます。
+
+```sh
+gh extension install UtakataKyosui/gh-local-repo-cleaner
+gh extension upgrade local-repo-cleaner
+```
 
 artifact を展開してローカル導入する場合は、checksum を確認し、
 `gh-local-repo-cleaner` ディレクトリに tar を展開して `git init` した後、
