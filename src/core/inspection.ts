@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, lstat, realpath } from "node:fs/promises";
+import { access, lstat, readdir, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Context, Effect, Layer } from "effect";
 import { CommandRunner } from "../executil/command.ts";
@@ -43,6 +43,29 @@ export const RepositoryInspectorLive = Layer.effect(
 			inspect: (request: InspectionRequest) =>
 				Effect.gen(function* () {
 					const findings: Finding[] = [finding("ONLINE_NOT_VERIFIED")];
+					const linked = yield* Effect.tryPromise(
+						async () =>
+							(await realpath(request.path)) !== resolve(request.path),
+					).pipe(Effect.catch(() => Effect.succeed(false)));
+					if (linked) return [finding("PATH_SYMLINK")];
+					const special = yield* Effect.tryPromise(async () => {
+						try {
+							const stat = await lstat(join(request.path, ".git"));
+							return stat.isSymbolicLink();
+						} catch (error) {
+							if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+								throw error;
+							try {
+								return (
+									(await lstat(join(request.path, "HEAD"))).isFile() &&
+									(await lstat(join(request.path, "objects"))).isDirectory()
+								);
+							} catch {
+								return false;
+							}
+						}
+					}).pipe(Effect.catch(() => Effect.succeed(false)));
+					if (special) return [finding("UNSUPPORTED_LAYOUT")];
 					if (request.excluded) findings.push(finding("EXCLUDED"));
 					const git = (...args: string[]) =>
 						runner.run({
@@ -78,6 +101,53 @@ export const RepositoryInspectorLive = Layer.effect(
 						);
 					});
 					yield* check(layout, "UNSUPPORTED_LAYOUT");
+					yield* check(
+						git("rev-parse", "--show-toplevel").pipe(
+							Effect.map(
+								(output) =>
+									resolve(output.replace(/\n$/, "")) !== resolve(request.path),
+							),
+						),
+						"UNSUPPORTED_LAYOUT",
+					);
+					yield* check(
+						Effect.tryPromise(async () => {
+							async function nested(directory: string): Promise<boolean> {
+								for (const entry of await readdir(directory, {
+									withFileTypes: true,
+								})) {
+									if (
+										entry.name === ".git" ||
+										!entry.isDirectory() ||
+										entry.isSymbolicLink()
+									)
+										continue;
+									const child = join(directory, entry.name);
+									try {
+										await lstat(join(child, ".git"));
+										return true;
+									} catch (error) {
+										if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+											throw error;
+									}
+									try {
+										if (
+											(await lstat(join(child, "HEAD"))).isFile() &&
+											(await lstat(join(child, "objects"))).isDirectory()
+										)
+											return true;
+									} catch (error) {
+										if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+											throw error;
+									}
+									if (await nested(child)) return true;
+								}
+								return false;
+							}
+							return nested(request.path);
+						}),
+						"NESTED_REPOSITORY",
+					);
 					const exists = (path: string) =>
 						Effect.tryPromise(async () => {
 							try {
@@ -316,16 +386,6 @@ export const RepositoryInspectorLive = Layer.effect(
 							"SUBMODULE_PRESENT",
 							(s: string) => s.split("\0").some((v) => v.startsWith("160000 ")),
 						],
-						[
-							["for-each-ref", "--format=%(upstream)", "refs/heads/"],
-							"UPSTREAM_MISSING",
-							(s: string) =>
-								s === "" ||
-								s
-									.slice(0, -1)
-									.split("\n")
-									.some((v) => v === ""),
-						],
 						[["remote"], "NO_REMOTE", (s: string) => s.trim() === ""],
 					] as const) {
 						yield* check(git(...args).pipe(Effect.map(predicate)), code);
@@ -342,7 +402,19 @@ export const RepositoryInspectorLive = Layer.effect(
 					);
 					const verified = yield* verifyRemoteObjects(request.path).pipe(
 						Effect.provideService(CommandRunner, runner),
-						Effect.catch(() => Effect.succeed(null)),
+						Effect.catch((error) => {
+							const code = error instanceof Error ? error.message : "";
+							findings.push(
+								finding(
+									code === "REMOTE_CHANGED_DURING_SCAN" ||
+										code === "UNSUPPORTED_TRANSPORT" ||
+										code === "REMOTE_MISSING"
+										? code
+										: "REMOTE_VERIFICATION_FAILED",
+								),
+							);
+							return Effect.succeed(null);
+						}),
 					);
 					if (verified) {
 						const provisional = new Set([
@@ -357,9 +429,52 @@ export const RepositoryInspectorLive = Layer.effect(
 						);
 						const objects = (s: string) => s.trim().split("\n").filter(Boolean);
 						const validation = Effect.gen(function* () {
-							const commits = objects(yield* git("rev-list", "--all", "HEAD"));
-							if (commits.some((id) => !verified.objects.has(id)))
-								confirmed.push(finding("UNPUSHED_COMMITS"));
+							const localCommits = new Set<string>();
+							const branches = objects(
+								yield* git(
+									"for-each-ref",
+									"--format=%(refname)%09%(upstream:remotename)%09%(upstream:remoteref)",
+									"refs/heads/",
+									// Tracking refs are local history to preserve, never remote evidence.
+									"refs/remotes/",
+								),
+							);
+							for (const row of branches) {
+								const [branch, remote, upstream] = row.split("\t");
+								if (!branch) throw new Error("Invalid branch");
+								if (
+									remote &&
+									remote !== "." &&
+									upstream &&
+									!verified.heads.get(remote)?.has(upstream)
+								)
+									confirmed.push({ ...finding("UPSTREAM_MISSING"), branch });
+								const commits = objects(yield* git("rev-list", branch));
+								for (const id of commits) localCommits.add(id);
+								const count = commits.filter(
+									(id) => !verified.objects.has(id),
+								).length;
+								if (count)
+									confirmed.push({
+										...finding("UNPUSHED_COMMITS"),
+										branch,
+										commit_count: count,
+										message: `${branch}: ${count} unpreserved commits`,
+									});
+							}
+							const headCommits = objects(yield* git("rev-list", "HEAD"));
+							for (const id of headCommits) localCommits.add(id);
+							const headCount = headCommits.filter(
+								(id) => !verified.objects.has(id),
+							).length;
+							if (
+								headCount &&
+								findings.some((item) => item.code === "DETACHED_HEAD")
+							)
+								confirmed.push({
+									...finding("DETACHED_HEAD_ONLY_COMMITS"),
+									commit_count: headCount,
+								});
 							for (const line of objects(
 								yield* git(
 									"for-each-ref",
@@ -374,7 +489,9 @@ export const RepositoryInspectorLive = Layer.effect(
 							if (
 								objects(
 									yield* git("reflog", "show", "--all", "--format=%H"),
-								).some((id) => !verified.objects.has(id))
+								).some(
+									(id) => !localCommits.has(id) && !verified.objects.has(id),
+								)
 							)
 								confirmed.push(finding("REFLOG_ONLY_COMMITS"));
 							const unreachable = objects(

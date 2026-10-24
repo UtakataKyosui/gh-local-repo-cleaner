@@ -1,6 +1,21 @@
 export type Status = "SAFE" | "DIRTY" | "PROTECTED" | "UNKNOWN";
 
 const reasons = {
+	PATH_SYMLINK: ["PROTECTED", "Preserve symbolic-link paths manually."],
+	NESTED_REPOSITORY: ["PROTECTED", "Preserve nested repositories manually."],
+	EXCLUDED_BY_CONFIG: ["PROTECTED", "Review the exclusion configuration."],
+	REMOTE_CHANGED_DURING_SCAN: [
+		"UNKNOWN",
+		"Scan again after remote refs stabilize.",
+	],
+	UNSUPPORTED_TRANSPORT: ["UNKNOWN", "Use a supported remote transport."],
+	REMOTE_VERIFICATION_FAILED: [
+		"UNKNOWN",
+		"Resolve remote verification failures.",
+	],
+	REMOTE_MISSING: ["UNKNOWN", "Configure and verify a remote."],
+	DETACHED_HEAD_ONLY_COMMITS: ["DIRTY", "Preserve detached HEAD commits."],
+	LOCAL_REMOTE_DEPENDENCY: ["PROTECTED", "Preserve local remote dependencies."],
 	STAGED_CHANGES: ["DIRTY", "Review and commit staged changes manually."],
 	UNSTAGED_CHANGES: ["DIRTY", "Save and commit worktree changes manually."],
 	UNTRACKED_FILES: ["DIRTY", "Track or separately save untracked files."],
@@ -70,6 +85,9 @@ const reasons = {
 
 export type ReasonCode = keyof typeof reasons;
 export interface Finding {
+	readonly rule_index?: number;
+	readonly branch?: string;
+	readonly commit_count?: number;
 	readonly code: ReasonCode;
 	readonly status: Status;
 	readonly action: string;
@@ -102,7 +120,12 @@ export function diagnose(
 	findings: readonly Finding[],
 ): Diagnosis {
 	const unique = [
-		...new Map(findings.map((item) => [item.code, item])).values(),
+		...new Map(
+			findings.map((item) => [
+				`${item.code}:${item.branch ?? ""}:${item.rule_index ?? ""}`,
+				item,
+			]),
+		).values(),
 	];
 	return {
 		schema_version: 1,

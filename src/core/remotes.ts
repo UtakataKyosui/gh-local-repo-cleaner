@@ -13,6 +13,7 @@ export const effectiveRemotes = (path: string) =>
 			runner.run({ executable: "git", args: ["-C", path, ...args] });
 		const names = (yield* git("remote")).trim().split("\n").filter(Boolean);
 		const remotes: {
+			readonly name: string;
 			readonly url: string;
 			readonly localPath: string | null;
 		}[] = [];
@@ -23,6 +24,12 @@ export const effectiveRemotes = (path: string) =>
 			if (urls.length !== 1 || !urls[0] || urls[0].includes("\0"))
 				throw new Error("Ambiguous remote URL");
 			const expanded = urls[0];
+			if (
+				/^[a-z][a-z0-9+.-]*::/i.test(expanded) ||
+				(/^[a-z][a-z0-9+.-]*:\/\//i.test(expanded) &&
+					!/^(https?|ssh|git|file):\/\//i.test(expanded))
+			)
+				throw new Error("UNSUPPORTED_TRANSPORT");
 			const local = expanded.startsWith("file://")
 				? fileURLToPath(expanded)
 				: isAbsolute(expanded) || !/^[^/]+:/.test(expanded)
@@ -46,11 +53,15 @@ export const effectiveRemotes = (path: string) =>
 								throw error;
 							}
 						});
-			remotes.push({ url: localPath ?? expanded, localPath });
+			remotes.push({ name, url: localPath ?? expanded, localPath });
 		}
 		return remotes;
 	}).pipe(
-		Effect.catchDefect(() =>
-			Effect.fail(new Error("Remote URL resolution failed")),
+		Effect.catchDefect((error) =>
+			Effect.fail(
+				error instanceof Error && error.message === "UNSUPPORTED_TRANSPORT"
+					? error
+					: new Error("Remote URL resolution failed"),
+			),
 		),
 	);

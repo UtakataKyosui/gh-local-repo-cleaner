@@ -13,6 +13,7 @@ export interface Assessment {
 	readonly reasons: readonly Finding[];
 	readonly checked_at: string;
 	readonly metadata: {
+		readonly metadata_errors?: readonly string[];
 		readonly size_bytes: number | null;
 		readonly last_commit_at: string | null;
 	};

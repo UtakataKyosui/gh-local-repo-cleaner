@@ -5,6 +5,15 @@ HOME / XDG / Git global / system 設定を隔離し、author identity は fixtur
 ghq は PATH 上の偽 executable で再現する。public remote、ユーザーの ghq root、
 実 GitHub 認証、ユーザーのリポジトリの移動・削除は使わない。
 
+## Issue #3 / #5 / #7: 探索・オンライン検証・設定とメタデータ
+
+- `src/core/discovery.test.ts`: 偽ghq executableで空一覧、複数・入れ子ルート、正規化、実体重複、末尾空白、日本語、曖昧な管理名、コマンド失敗を検証。spawn/timeoutはrunner境界で故障注入。
+- `src/core/core.test.ts`: ローカルbare remoteで削除・force push、非checkoutブランチの未保全件数、detached HEAD、複数remoteの和集合と部分失敗、独自refsの除外、削除upstream、未対応transport、取得中のremote変更と元snapshot不変を検証。
+- `src/core/configuration.test.ts`: version/キー/ルールの厳密検証、globの文字クラス・エスケープ・スラッシュ境界、既定/明示ファイルの不在、容量のGit/ignored・hardlink・symlink循環・読み取り失敗を検証。権限テストはroot実行時のみskip。
+- `src/commands/integration.test.ts`: 設定変更後の移動停止、ignored内の入れ子リポジトリ保護、全ブランチtipの最大日時、空リポジトリのnull、メタデータ取得失敗時のSAFE維持とJSONエラー表現を検証。
+- `src/commands/commands.test.ts`: SAFE容量概算・欠損件数とフィルター前の集計を検証。
+- `stale remote-tracking history without reflogs is diagnosed and never evacuated`（integration）: remoteブランチとローカルブランチを削除しreflogを失効させても、tracking refだけに残る固有履歴をDIRTYとして検出し、cleanで移動しないことを実Gitで検証。現在のremoteに同じ履歴を保全するとSAFEに戻ることも確認。
+
 ## Issue #4: ローカル保護判定
 
 | 要件 | テスト名（src/core/core.test.ts） | OS |

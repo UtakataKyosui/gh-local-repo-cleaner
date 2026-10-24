@@ -14,6 +14,12 @@ export function present(batch: Batch, invocation: Invocation) {
 			!invocation.status || item.status.toLowerCase() === invocation.status,
 	);
 	const summary = {
+		safe_size_bytes_estimate: all
+			.filter((item) => item.status === "SAFE")
+			.reduce((total, item) => total + (item.metadata.size_bytes ?? 0), 0),
+		safe_size_unknown_count: all.filter(
+			(item) => item.status === "SAFE" && item.metadata.size_bytes === null,
+		).length,
 		scanned: all.length,
 		returned: shown.length,
 		safe: 0,
@@ -46,8 +52,13 @@ export function present(batch: Batch, invocation: Invocation) {
 		: [
 				...repositories.flatMap((repo) => [
 					`${repo.status} ${JSON.stringify(repo.path)}`,
-					...repo.reasons.map((reason) => `  ${reason.code}: ${reason.action}`),
+					`  Logical bytes (estimate): ${repo.metadata.size_bytes ?? "unknown"}; last commit: ${repo.metadata.last_commit_at ?? "unknown"}`,
+					...(repo.metadata.metadata_errors ?? []).map((error) => `  ${error}`),
+					...repo.reasons.map(
+						(reason) => `  ${reason.code}: ${reason.message}; ${reason.action}`,
+					),
 				]),
+				`SAFE logical bytes (estimate): ${summary.safe_size_bytes_estimate}; unknown sizes: ${summary.safe_size_unknown_count}`,
 				`Scanned ${summary.scanned}; returned ${summary.returned}; SAFE ${summary.safe}; DIRTY ${summary.dirty}; PROTECTED ${summary.protected}; UNKNOWN ${summary.unknown}`,
 			].join("\n");
 	return {

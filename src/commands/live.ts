@@ -59,14 +59,10 @@ export const applicationLive = (
 					const repositories = yield* discover(invocation);
 					const assessments: Assessment[] = [];
 					for (const repository of repositories) {
-						const excluded = patterns.some(
-							(pattern) =>
-								new Bun.Glob(pattern).match(repository.path) ||
-								new Bun.Glob(pattern).match(repository.name),
-						);
+						const ruleIndex = patterns.match(repository);
+						const excluded = ruleIndex >= 0;
 						const inspected = yield* inspectRepositorySnapshot({
 							path: repository.path,
-							excluded,
 						});
 						const boundary = yield* Effect.tryPromise(
 							async () =>
@@ -74,17 +70,47 @@ export const applicationLive = (
 								within(repository.root, repository.path),
 						).pipe(Effect.catch(() => Effect.succeed(false)));
 						const reasons = [...inspected.diagnosis.reasons];
-						if (!boundary) reasons.push(finding("UNSUPPORTED_LAYOUT"));
+						if (excluded)
+							reasons.push({
+								...finding("EXCLUDED_BY_CONFIG"),
+								rule_index: ruleIndex,
+							});
+						if (
+							!boundary ||
+							repository.path === homedir() ||
+							repository.path === process.cwd() ||
+							within(repository.path, process.cwd())
+						)
+							reasons.push(finding("UNSUPPORTED_LAYOUT"));
 						const size = yield* Effect.tryPromise((signal) =>
 							sizeBytes(repository.path, signal),
 						).pipe(Effect.catch(() => Effect.succeed(null)));
 						const date = yield* runner
 							.run({
 								executable: "git",
-								args: ["-C", repository.path, "log", "-1", "--format=%cI"],
+								args: [
+									"-C",
+									repository.path,
+									"log",
+									"--no-walk",
+									"--format=%ct",
+									"--branches",
+									"HEAD",
+								],
 							})
 							.pipe(
-								Effect.map((value) => value.trim()),
+								Effect.map((value) => {
+									const times = value
+										.trim()
+										.split("\n")
+										.filter(Boolean)
+										.map(Number);
+									if (!times.length) return null;
+									if (times.some((time) => !Number.isFinite(time)))
+										throw new Error("Invalid timestamp");
+									return new Date(Math.max(...times) * 1000).toISOString();
+								}),
+								Effect.catchDefect(() => Effect.succeed(null)),
 								Effect.catch(() => Effect.succeed(null)),
 							);
 						const result = diagnose(repository.path, reasons);
@@ -93,7 +119,14 @@ export const applicationLive = (
 							status: result.status,
 							reasons: result.reasons,
 							checked_at: now(),
-							metadata: { size_bytes: size, last_commit_at: date },
+							metadata: {
+								size_bytes: size,
+								last_commit_at: date,
+								metadata_errors: [
+									...(size === null ? ["SIZE_UNAVAILABLE"] : []),
+									...(date === null ? ["LAST_COMMIT_UNAVAILABLE"] : []),
+								],
+							},
 							snapshot: inspected.snapshot,
 						});
 					}
@@ -152,7 +185,7 @@ export const applicationLive = (
 									) {
 										const result = diagnose(candidate.repository.path, [
 											...candidate.reasons,
-											finding("REMOTE_DEPENDENCY"),
+											finding("LOCAL_REMOTE_DEPENDENCY"),
 										]);
 										assessments[other] = {
 											...candidate,
@@ -175,7 +208,14 @@ export const applicationLive = (
 								code:
 									error instanceof UsageError
 										? "CONFIG_OR_TARGET_ERROR"
-										: "DISCOVERY_FAILED",
+										: error instanceof Error &&
+												[
+													"GHQ_NOT_FOUND",
+													"GHQ_TIMEOUT",
+													"GHQ_COMMAND_FAILED",
+												].includes(error.message)
+											? error.message
+											: "DISCOVERY_FAILED",
 							}),
 					),
 				);
@@ -234,6 +274,10 @@ export const applicationLive = (
 						}
 						if (!invocation.dryRun && !invocation.yes && !input.tty)
 							throw new UsageError("Non-interactive clean requires --yes");
+						const configBefore = yield* Effect.tryPromise({
+							try: () => exclusions(invocation.config),
+							catch: (error) => error,
+						});
 						const batch = yield* diagnoseBatch(invocation);
 						const messages: string[] = [];
 						let failed = false;
@@ -265,8 +309,13 @@ export const applicationLive = (
 								continue;
 							}
 							const expected = item.snapshot;
-							const revalidate = () =>
-								Effect.runPromise(
+							const revalidate = async () => {
+								if (
+									(await exclusions(invocation.config)).fingerprint !==
+									configBefore.fingerprint
+								)
+									return false;
+								const valid = await Effect.runPromise(
 									diagnoseBatch(invocation).pipe(
 										Effect.map((fresh) => {
 											const current = fresh.assessments.find(
@@ -280,6 +329,12 @@ export const applicationLive = (
 										}),
 									),
 								);
+								return (
+									valid &&
+									(await exclusions(invocation.config)).fingerprint ===
+										configBefore.fingerprint
+								);
+							};
 							const moved = yield* Effect.uninterruptible(
 								Effect.tryPromise(() =>
 									store.moveRepository(
