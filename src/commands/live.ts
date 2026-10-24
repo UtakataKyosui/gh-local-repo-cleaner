@@ -12,7 +12,7 @@ import {
 	RepositoryInspectorLive,
 } from "../core/inspection.ts";
 import { effectiveRemotes } from "../core/remotes.ts";
-import { TrashStore } from "../core/trash.ts";
+import { type TrashSession, TrashStore } from "../core/trash.ts";
 import { CommandRunner, CommandRunnerLive } from "../executil/command.ts";
 import type { Assessment, Batch } from "../model/assessment.ts";
 import { type Invocation, UsageError } from "./arguments.ts";
@@ -254,7 +254,7 @@ export const applicationLive = (
 							const entry = entries.entries.find(
 								(entry) => entry.id === invocation.target,
 							);
-							if (entry?.status !== "moved")
+							if (entry?.status !== "moved" && entry?.status !== "recoverable")
 								return yield* Effect.fail(
 									new ServiceError({ code: "UNKNOWN_OR_UNRESTORABLE_ID" }),
 								);
@@ -268,7 +268,14 @@ export const applicationLive = (
 							);
 							if (!accepted) return "Skipped.";
 							yield* Effect.uninterruptible(
-								Effect.tryPromise(() => store.restore(invocation.target ?? "")),
+								Effect.tryPromise(async () => {
+									const session = await store.open();
+									try {
+										await session.restore(invocation.target ?? "");
+									} finally {
+										await session.close();
+									}
+								}),
 							);
 							return `Restored ${invocation.target}.`;
 						}
@@ -281,6 +288,10 @@ export const applicationLive = (
 						const batch = yield* diagnoseBatch(invocation);
 						const messages: string[] = [];
 						let failed = false;
+						let session: TrashSession | null = null;
+						yield* Effect.addFinalizer(() =>
+							Effect.promise(async () => session?.close()),
+						);
 						for (const item of batch.assessments) {
 							const path = item.repository.path;
 							if (item.status === "UNKNOWN") failed = true;
@@ -309,6 +320,8 @@ export const applicationLive = (
 								continue;
 							}
 							const expected = item.snapshot;
+							session ??= yield* Effect.tryPromise(() => store.open());
+							const held = session;
 							const revalidate = async () => {
 								if (
 									(await exclusions(invocation.config)).fingerprint !==
@@ -337,7 +350,7 @@ export const applicationLive = (
 							};
 							const moved = yield* Effect.uninterruptible(
 								Effect.tryPromise(() =>
-									store.moveRepository(
+									held.moveRepository(
 										path,
 										item.repository.root,
 										expected,
@@ -362,6 +375,7 @@ export const applicationLive = (
 							return yield* Effect.fail(new ServiceError({ code: message }));
 						return message;
 					}).pipe(
+						Effect.scoped,
 						Effect.catchDefect((error) => Effect.fail(error)),
 						Effect.mapError((error) =>
 							error instanceof ServiceError

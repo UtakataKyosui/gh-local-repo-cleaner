@@ -14,6 +14,21 @@ import { pathToFileURL } from "node:url";
 import { Effect, Layer } from "effect";
 import { snapshot } from "../core/snapshot.ts";
 import { TrashStore } from "../core/trash.ts";
+
+async function moveVia(
+	store: TrashStore,
+	...parameters: Parameters<
+		Awaited<ReturnType<TrashStore["open"]>>["moveRepository"]
+	>
+) {
+	const session = await store.open();
+	try {
+		return await session.moveRepository(...parameters);
+	} finally {
+		await session.close();
+	}
+}
+
 import {
 	CommandError,
 	CommandRunner,
@@ -155,7 +170,7 @@ test("E2E-08/10 clean -> trash list -> restore retains data and rejects collisio
 	expect(
 		(await f.run("restore", id, "--yes", "--state-dir", f.store)).code,
 	).toBe(1);
-	const recordPath = join(f.store, `${id}.json`);
+	const recordPath = join(f.store, "entries", id, "record.json");
 	const record = JSON.parse(await readFile(recordPath, "utf8"));
 	record.data = record.data.replace('"status":"restored"', '"status":"moved"');
 	await writeFile(recordPath, JSON.stringify(record));
@@ -169,7 +184,8 @@ test("E2E-09 record failure after rename exposes recovery candidate without losi
 		if (status === "moved") throw new Error("Injected record failure");
 	});
 	await expect(
-		store.moveRepository(
+		moveVia(
+			store,
 			repo.path,
 			f.root,
 			await snapshot(repo.path),
@@ -178,10 +194,10 @@ test("E2E-09 record failure after rename exposes recovery candidate without losi
 	).rejects.toThrow();
 	const result = await new TrashStore(f.store).list();
 	expect(result.failed).toBe(true);
-	expect(result.entries[0]?.status).toBe("recovery-required");
+	expect(result.entries[0]?.status).toBe("recoverable");
 	expect(
 		await readFile(
-			join(f.store, result.entries[0]?.id ?? "", "tracked"),
+			join(f.store, "entries", result.entries[0]?.id ?? "", "repo", "tracked"),
 			"utf8",
 		),
 	).toBe("preserved\n");
@@ -265,7 +281,8 @@ test("exclusion configuration, symlink escapes and injected EXDEV never move sou
 		throw Object.assign(new Error("Injected EXDEV"), { code: "EXDEV" });
 	});
 	await expect(
-		store.moveRepository(
+		moveVia(
+			store,
 			repo.path,
 			f.root,
 			await snapshot(repo.path),
@@ -365,7 +382,7 @@ test("separate clean processes serialize under the store lock", async () => {
 	).toHaveLength(1);
 	expect(
 		await readFile(
-			join(f.store, listed.entries[0]?.id ?? "", "tracked"),
+			join(f.store, "entries", listed.entries[0]?.id ?? "", "repo", "tracked"),
 			"utf8",
 		),
 	).toBe("preserved\n");
@@ -378,7 +395,7 @@ test("separate process death immediately after rename leaves a recoverable pendi
 	const script = join(f.base, "crash.ts");
 	await writeFile(
 		script,
-		`import { rename } from "node:fs/promises";\nimport { TrashStore } from ${JSON.stringify(join(process.cwd(), "src/core/trash.ts"))};\nimport { snapshot } from ${JSON.stringify(join(process.cwd(), "src/core/snapshot.ts"))};\nconst store = new TrashStore(${JSON.stringify(f.store)}, async (a,b) => { await rename(a,b); process.kill(process.pid, "SIGKILL"); });\nawait store.moveRepository(${JSON.stringify(repo.path)}, ${JSON.stringify(f.root)}, await snapshot(${JSON.stringify(repo.path)}), async () => true);\n`,
+		`import { rename } from "node:fs/promises";\nimport { TrashStore } from ${JSON.stringify(join(process.cwd(), "src/core/trash.ts"))};\nimport { snapshot } from ${JSON.stringify(join(process.cwd(), "src/core/snapshot.ts"))};\nconst store = new TrashStore(${JSON.stringify(f.store)}, async (a,b) => { await rename(a,b); process.kill(process.pid, "SIGKILL"); });\nconst session = await store.open();\nawait session.moveRepository(${JSON.stringify(repo.path)}, ${JSON.stringify(f.root)}, await snapshot(${JSON.stringify(repo.path)}), async () => true);\n`,
 	);
 	const child = Bun.spawn([process.execPath, script], {
 		env: f.env,
@@ -388,10 +405,10 @@ test("separate process death immediately after rename leaves a recoverable pendi
 	expect(await child.exited).not.toBe(0);
 	const listed = await new TrashStore(f.store).list();
 	expect(listed.failed).toBe(true);
-	expect(listed.entries[0]?.status).toBe("recovery-required");
+	expect(listed.entries[0]?.status).toBe("recoverable");
 	expect(
 		await readFile(
-			join(f.store, listed.entries[0]?.id ?? "", "tracked"),
+			join(f.store, "entries", listed.entries[0]?.id ?? "", "repo", "tracked"),
 			"utf8",
 		),
 	).toBe("preserved\n");
@@ -434,7 +451,7 @@ test("injected permission and pending-record failures preserve the source", asyn
 		});
 	});
 	await expect(
-		denied.moveRepository(repo.path, f.root, before, async () => true),
+		moveVia(denied, repo.path, f.root, before, async () => true),
 	).rejects.toThrow();
 	expect(await snapshot(repo.path)).toEqual(before);
 	const store2 = join(f.base, "record-failure");
@@ -442,7 +459,7 @@ test("injected permission and pending-record failures preserve the source", asyn
 		throw new Error("Injected write failure");
 	});
 	await expect(
-		failed.moveRepository(repo.path, f.root, before, async () => true),
+		moveVia(failed, repo.path, f.root, before, async () => true),
 	).rejects.toThrow();
 	expect(await snapshot(repo.path)).toEqual(before);
 });
