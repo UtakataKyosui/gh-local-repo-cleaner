@@ -1,5 +1,6 @@
 import type { Batch } from "../model/assessment.ts";
 import type { Invocation } from "./arguments.ts";
+import { describeReason, text } from "./messages.ts";
 
 const otherGroup = "Other";
 const statuses = ["safe", "dirty", "protected", "unknown"] as const;
@@ -14,6 +15,7 @@ const palette = {
 } as const;
 
 export function present(batch: Batch, invocation: Invocation, color = false) {
+	const labels = text(invocation.lang);
 	const paint = (code: string, text: string) =>
 		color ? `\x1b[${code}m${text}\x1b[0m` : text;
 	const paintStatus = (status: keyof typeof palette) =>
@@ -113,27 +115,44 @@ export function present(batch: Batch, invocation: Invocation, color = false) {
 					`${paintStatus(repo.status)} ${JSON.stringify(repo.path)}`,
 					...(invocation.operation === "inspect"
 						? [
-								`  Source: ${repo.source}; root: ${JSON.stringify(repo.root)}; name: ${JSON.stringify(repo.name)}`,
-								`  Checked at: ${repo.checked_at}`,
+								labels.source(
+									repo.source,
+									JSON.stringify(repo.root),
+									JSON.stringify(repo.name),
+								),
+								labels.checkedAt(repo.checked_at),
 							]
 						: []),
 					paint(
 						palette.dim,
-						`  Logical bytes (estimate): ${repo.metadata.size_bytes ?? "unknown"}; last commit: ${repo.metadata.last_commit_at ?? "unknown"}`,
+						labels.repository(
+							repo.metadata.size_bytes,
+							repo.metadata.last_commit_at,
+						),
 					),
 					...(repo.metadata.metadata_errors ?? []).map((error) =>
 						paint(palette.UNKNOWN, `  ${error}`),
 					),
 					...repo.reasons.map(
 						(reason) =>
-							`  ${paint(palette[repo.status], reason.code)}: ${reason.message}; ${reason.action}`,
+							`  ${paint(palette[repo.status], reason.code)}: ${describeReason(invocation.lang, reason)}`,
 					),
 				]),
 				paint(
 					palette.dim,
-					`SAFE logical bytes (estimate): ${summary.safe_size_bytes_estimate}; unknown sizes: ${summary.safe_size_unknown_count}`,
+					labels.safeSize(
+						summary.safe_size_bytes_estimate,
+						summary.safe_size_unknown_count,
+					),
 				),
-				`Scanned ${summary.scanned}; returned ${summary.returned}; ${paintStatus("SAFE")} ${summary.safe}; ${paintStatus("DIRTY")} ${summary.dirty}; ${paintStatus("PROTECTED")} ${summary.protected}; ${paintStatus("UNKNOWN")} ${summary.unknown}`,
+				labels.totals(
+					summary.scanned,
+					summary.returned,
+					statuses.map(
+						(status) =>
+							`${paintStatus(status.toUpperCase() as keyof typeof palette)} ${summary[status]}`,
+					),
+				),
 			].join("\n");
 	return {
 		stdout,

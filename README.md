@@ -34,6 +34,7 @@ gh local-repo-cleaner scan ~/projects         # 直下だけ、再帰探索し�
 gh local-repo-cleaner ~/projects              # scan の省略形
 gh local-repo-cleaner list ~/projects --status safe --json
 gh local-repo-cleaner scan --group-by language # 言語ごとに見出しを付けて表示
+gh local-repo-cleaner scan --lang ja          # 表示を日本語にする
 gh local-repo-cleaner inspect ./project
 gh local-repo-cleaner inspect github.com/owner/repo
 gh local-repo-cleaner clean ~/projects --dry-run
@@ -117,6 +118,10 @@ cleanは移動直前に設定を再読込し、内容変更・エラー時は停
 理由は code / status / message / action を含みます。内部 snapshot は出力しません。
 パス順・理由 code 順に並べ、診断は stderr に分離します。
 `list --status` の summary と終了値はフィルター前の全件から算出します。
+
+`scan` / `list` / `inspect` の `--lang en|ja`（既定 `en`）は、テキスト出力の見出し・ラベル・
+手動対処案・エラー文を切り替えます。環境変数の `LANG` は参照しません。状態名（SAFE など）、
+理由コード、`--json` の内容、`clean` / `restore` の確認文と引数エラー文は翻訳しません。
 
 `scan` / `list` の `--group-by language` は、リポジトリを主言語ごとにまとめて表示します
 （言語名の昇順、判定不能の `Other` は末尾）。見出しには表示対象の状態別件数を出します。

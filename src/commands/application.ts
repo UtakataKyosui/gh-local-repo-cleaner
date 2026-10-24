@@ -10,6 +10,7 @@ import {
 	normalizeArguments,
 	UsageError,
 } from "./arguments.ts";
+import { failureMessage } from "./messages.ts";
 import { present } from "./output.ts";
 import { Application, ApplicationUnavailable } from "./services.ts";
 
@@ -18,15 +19,6 @@ interface IO {
 	readonly stderr: (text: string) => void;
 	readonly color?: boolean;
 }
-
-const failureMessages: Record<string, string> = {
-	SERVICE_NOT_CONNECTED: "Required application service is unavailable.",
-	GHQ_NOT_FOUND: "ghq was not found; install ghq or specify a directory.",
-	GHQ_TIMEOUT: "ghq timed out while listing repositories.",
-	GHQ_COMMAND_FAILED: "ghq failed while listing repositories.",
-	DISCOVERY_FAILED: "Repository enumeration failed.",
-	CONFIG_OR_TARGET_ERROR: "Invalid configuration or target.",
-};
 
 export async function runCli(
 	argv: readonly string[],
@@ -78,9 +70,7 @@ export async function runCli(
 								{
 									code: error.code,
 									message:
-										error.detail ??
-										failureMessages[error.code] ??
-										"Diagnosis failed.",
+										error.detail ?? failureMessage(invocation.lang, error.code),
 								},
 							],
 						};
@@ -149,6 +139,11 @@ export async function runCli(
 								type: "string",
 								description: "Group output by language (marker-file based)",
 							},
+							{
+								name: "lang",
+								type: "string",
+								description: "Display language of the text output: en or ja",
+							},
 						)
 						.action(handler(() => program)),
 			),
@@ -188,6 +183,11 @@ export async function runCli(
 								type: "string",
 								description: "Group output by language (marker-file based)",
 							},
+							{
+								name: "lang",
+								type: "string",
+								description: "Display language of the text output: en or ja",
+							},
 						)
 						.action(handler(() => program)),
 			),
@@ -211,6 +211,11 @@ export async function runCli(
 								name: "config",
 								type: "string",
 								description: "Path to a config file replacing the default",
+							},
+							{
+								name: "lang",
+								type: "string",
+								description: "Display language of the text output: en or ja",
 							},
 						)
 						.action(handler(() => program)),

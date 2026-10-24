@@ -62,6 +62,10 @@ test.each(
 		["scan", "--group-by"],
 		["inspect", "x", "--group-by", "language"],
 		["clean", "--group-by", "language"],
+		["scan", "--lang", "fr"],
+		["scan", "--lang"],
+		["clean", "--lang", "ja"],
+		["restore", "0123456789abcdef0123456789abcdef", "--lang", "ja"],
 		["list", "--yes"],
 		["list", "--delete"],
 		["list", "--dry-run"],
@@ -143,6 +147,46 @@ test("JSON contract excludes snapshots and filters display without hiding UNKNOW
 	expect(json.errors).toEqual([]);
 	expect(result.stdout).not.toContain("secret-internal");
 	expect(result.exitCode).toBe(1);
+});
+
+test("--lang ja translates labels and actions while codes, statuses and JSON stay untranslated", () => {
+	const batch: Batch = {
+		assessments: [assessment("/test/a", "UNKNOWN")],
+		errors: [],
+	};
+	const english = present(batch, normalizeArguments(["scan"])).stdout;
+	expect(english).toContain("Scanned 1");
+	expect(english).not.toContain("検査");
+	expect(normalizeArguments(["scan"]).lang).toBe("en");
+	const japanese = present(
+		batch,
+		normalizeArguments(["scan", "--lang", "ja"]),
+	).stdout;
+	expect(japanese).toContain('UNKNOWN "/test/a"');
+	expect(japanese).toContain("LOCAL_INSPECTION_FAILED: 検査の失敗を解消して");
+	expect(japanese).toContain("検査 1 件; 表示 1 件; SAFE 0");
+	expect(japanese).not.toContain("Scanned");
+	const json = JSON.parse(
+		present(batch, normalizeArguments(["scan", "--json", "--lang", "ja"]))
+			.stdout,
+	);
+	expect(json.repositories[0].reasons[0]).toMatchObject({
+		code: "LOCAL_INSPECTION_FAILED",
+		message: "local inspection failed",
+		action: "Resolve the inspection failure and scan again.",
+	});
+});
+
+test("--lang ja localizes failure messages but keeps the original error detail", async () => {
+	const stderr: string[] = [];
+	const stdout: string[] = [];
+	await runCli(["scan", "--lang", "ja"], {
+		stdout: (text) => stdout.push(text),
+		stderr: (text) => stderr.push(text),
+	});
+	expect(stderr.join("")).toContain(
+		"SERVICE_NOT_CONNECTED: 必要なアプリケーションサービスが利用できません。",
+	);
 });
 
 test("--group-by language sorts by language, puts unknown last and adds per-language counts", () => {
