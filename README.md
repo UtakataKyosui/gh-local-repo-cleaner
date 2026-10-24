@@ -156,8 +156,8 @@ CI artifacts の `distribution/` には raw binary、全隣接 asset 入り tar.
 artifact を展開してローカル導入する場合は、checksum を確認し、
 `gh-local-repo-cleaner` ディレクトリに tar を展開して `git init` した後、
 そのディレクトリで `gh extension install .` を実行します。
-CI の配布対象は Linux x64 / Linux arm64 / macOS arm64 です。ローカルの実行検証は
-Linux arm64 / macOS arm64 で行い、Linux x64 は hosted CI の開始待ちです。
+CI の配布対象は Linux x64 / Linux arm64 / macOS arm64 です。3環境とも
+テスト・ビルド・拡張の導入・基本実行・成果物保存まで CI で検証済みです。
 他の OS / arch は配布検証対象外です。
 
 検査・Git runner・設定・snapshot・退避は `src/core/`、共通型は `src/model/`、

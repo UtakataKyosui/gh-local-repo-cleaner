@@ -64,8 +64,10 @@ macOS で Biome・Fallow・actionlint・bash 構文・git diff の検査に成�
 隔離した gh extension の導入・基本実行は両OSで検証し、最終の結果は PR 本文にも記録する。
 
 Linux x64 の QEMU エミュレーションでは Bun がテスト開始前に MemoryExhaustion で異常終了した。
-これはテスト成功に数えない。GitHub hosted CI はアカウントの支払い・利用上限で runner が開始せず、
-その実行を検証済みとはしない。Linux x64 / Linux arm64 / macOS arm64 の CI 定義を用意し、
+これはテスト成功に数えない。先行の GitHub hosted CI はアカウントの支払い・利用上限で runner が開始しなかった。
+その後、実装コミット `102546f` の [CI run 40094131443](https://github.com/UtakataKyosui/gh-local-repo-cleaner/actions/runs/40094131443) は
+Linux x64 / Linux arm64 / macOS arm64 の全環境でテスト・ビルド・隔離した拡張導入・配布検証・成果物保存に成功した。
+品質チェックも成功している。検証結果だけの文書更新には `[skip ci]` を付けて同じコードの再検証を避ける。
 テストはOS/archごとに1回だけ実行する。build・package・配布 smoke から bun test は呼ばない。
 すでにCIで成功した同一変更のテストをローカルで重複実行しない。
 
