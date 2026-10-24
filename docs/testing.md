@@ -42,6 +42,25 @@ ghq は PATH 上の偽 executable で再現する。public remote、ユーザー
 | NFR-06 出力上限 / UTF-8 / spawn / cancel | runner classifies output limits, invalid UTF-8, spawn failures and cancellation; cancellation propagates through Crust and returns 130 | macOS / Linux |
 | Effect ライフサイクル | official adapter releases the core layer on success / failure / cancel with its Exit（src/runtime.test.ts） | macOS / Linux |
 
+## Issue #6: 退避・復元と操作記録
+
+| 要件 | テスト | OS |
+| --- | --- | --- |
+| 排他ロック・上書きしない rename | `src/core/platform.test.ts`: 保持中の即時失敗、SIGKILL 後の解放、既存の空ディレクトリ・ファイル・不在元の拒否 | macOS / Linux |
+| 往復保持・保存先と権限 | `src/core/trash.test.ts`: round trip keeps .git, settings, modes and symlinks in private storage | macOS / Linux |
+| 確認後の変化・再検査 | trash.test.ts: a failed revalidation or a changed snapshot keeps the repository and creates no entry | macOS / Linux |
+| 自身・親・管理ルート・退避領域の保護 | trash.test.ts: the working directory, its parents, the management root and the store are never moved | macOS / Linux |
+| 記録失敗・rename 失敗（EXDEV / EACCES / 衝突） | trash.test.ts: record write failure before the move...; rename failures (EXDEV, EACCES, collision) keep the source and never fall back to copying | macOS / Linux |
+| 移動後の記録失敗・途中終了の識別 | trash.test.ts: a failed move record update reports the id...; prepared records reconcile...; an interrupted restore is recorded as restoring and can be resumed。integration.test.ts の別プロセス SIGKILL | macOS / Linux |
+| symlink 差し替え・確認後の変更・作業ディレクトリ保護 | trash.test.ts: a symlink swapped in for the repository after inspection is never followed or moved; a failed revalidation or a changed snapshot keeps the repository...（ファイル追加、ignored 設定・ignored ファイル、HEAD 更新）; a repository containing the working directory is never moved。integration.test.ts: clean run from inside a SAFE repository keeps that repository | macOS / Linux |
+| 強制終了の 3 時点（rename 前・rename 後・戻り後） | trash.test.ts: a process killed before the rename, after it, or after the move returns leaves an identifiable state（`not_moved` / `recoverable` / `moved`、ロック解放も確認） | macOS / Linux |
+| 要手動復旧 entry の restore | integration.test.ts: restore of an entry that needs manual recovery names its state and changes nothing | macOS / Linux |
+| 復元先衝突・親不在・上書き禁止 | trash.test.ts: restore refuses any existing destination and a missing parent, and never overwrites。integration.test.ts: concurrent restore processes never overwrite an existing destination | macOS / Linux |
+| 改ざん・`../../` ID・破損 record の隔離 | trash.test.ts: tampered records, changed payloads and traversal IDs are rejected; one corrupt entry does not hide the others... | macOS / Linux |
+| 権限不正・symlink・同時実行 | trash.test.ts: unsafe storage permissions and a second concurrent session fail without being used。integration.test.ts: an unsafe state directory or a held lock stops clean before any move | macOS / Linux |
+| 既定 state root | integration.test.ts: default state root follows an absolute XDG_STATE_HOME and ignores a relative one | macOS / Linux |
+| 配布バイナリでの FFI | `scripts/verify-distribution.sh`: ビルド済みバイナリで clean → trash list → restore | macOS / Linux |
+
 ## Issue #8: 統合・配布
 
 | ID / 要件 | テスト（src/commands/integration.test.ts、指定時 core.test.ts） | OS |
