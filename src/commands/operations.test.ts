@@ -454,6 +454,19 @@ test("trash list distinguishes an absent store from an unsafe one and never crea
 	expect(await readdir(real)).toEqual([]);
 });
 
+test("restore reports an unsafe store as STORE_UNSAFE and changes nothing", async () => {
+	const f = await setup();
+	await mkdir(f.store, { mode: 0o755 });
+	await chmod(f.store, 0o755);
+	const id = "0".repeat(32);
+	const unsafe = await f.run("restore", id, "--yes", "--state-dir", f.store);
+	expect(unsafe.code).toBe(1);
+	expect(unsafe.stderr).toContain("STORE_UNSAFE");
+	expect(unsafe.stderr).toContain("unsafe ownership, permissions or symlinks");
+	expect(unsafe.stderr).not.toContain("STORE_UNREADABLE");
+	expect(await readdir(f.store)).toEqual([]);
+});
+
 test("trash list rejects unsupported flags and extra arguments with exit 2", async () => {
 	const f = await setup();
 	for (const args of [

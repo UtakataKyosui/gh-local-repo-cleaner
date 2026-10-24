@@ -337,11 +337,16 @@ export const applicationLive = (
 								throw new UsageError("Non-interactive restore requires --yes");
 							const entries = yield* Effect.tryPromise({
 								try: () => store.list(),
-								catch: () =>
-									new ServiceError({
-										code: "STORE_UNREADABLE",
-										detail: `STORE_UNREADABLE: the state store could not be read safely. ${manual}`,
-									}),
+								catch: (error) => {
+									const code =
+										error instanceof TrashError
+											? error.code
+											: "STORE_UNREADABLE";
+									return new ServiceError({
+										code,
+										detail: `${code}${restoreHints[code] ?? `: the state store could not be read safely. ${manual}`}`,
+									});
+								},
 							});
 							const entry = entries.entries.find(
 								(candidate) => candidate.id === id,
