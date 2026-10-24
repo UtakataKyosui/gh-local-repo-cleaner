@@ -21,7 +21,11 @@ test.each([
 	[["inspect", "./-repo"], "inspect", "./-repo"],
 	[["clean", "--dry-run"], "clean", undefined],
 	[["trash", "list"], "trash", undefined],
-	[["restore", "id", "--yes"], "restore", "id"],
+	[
+		["restore", "0123456789abcdef0123456789abcdef", "--yes"],
+		"restore",
+		"0123456789abcdef0123456789abcdef",
+	],
 ] as const)("normalizes %j", (argv, operation, target) => {
 	expect(normalizeArguments(argv)).toMatchObject({ operation, target });
 });

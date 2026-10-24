@@ -66,6 +66,37 @@ ghq は PATH 上の偽 executable で再現する。public remote、ユーザー
 | 既定 state root | integration.test.ts: default state root follows an absolute XDG_STATE_HOME and ignores a relative one | macOS / Linux |
 | 配布バイナリでの FFI | `scripts/verify-distribution.sh`: ビルド済みバイナリで clean → trash list → restore | macOS / Linux |
 
+## Issue #13 / #14 / #15: clean・trash list・restore
+
+`src/commands/operations.test.ts`（実Git・一時領域のみ。移動失敗と記録失敗は TrashStore の move / beforeSave 境界で注入）。
+
+| Issue | 受入条件 | テスト |
+| --- | --- | --- |
+| #13 | 対象・退避先・空き容量・外部書込みの限界・移動済みID・結果件数・案内の表示 | clean shows the destination, limits, moved IDs and next steps |
+| #13 | dry-run は確認・領域・ロックなし。非TTYでも実行可 | clean --dry-run lists candidates and limits without a prompt, store or lock |
+| #13 | y/yes のみ承認、拒否・空入力・EOF はスキップで終了0 | clean confirmation approves only y/yes; refusal, empty input and EOF skip with exit 0 |
+| #13 | 旧形式と clean が同じサービス | clean DIR --delete --yes runs the same service as clean |
+| #13 | --json / --status / DIR+--ghq / 余分な引数は終了2 | clean rejects --json, --status and DIR with --ghq with exit 2 and moves nothing |
+| #13 | 未接続時は移動しない | clean with an unconnected service fails explicitly and moves nothing |
+| #13 | DIRTY / PROTECTED は --yes でも保持 | clean keeps DIRTY and PROTECTED even with --yes and exits 0 |
+| #13 | EXDEV・記録失敗の表示と終了1、残りの停止 | clean reports injected EXDEV and record failures with exit 1 and keeps the data |
+| #13 | Ctrl-C は130 | clean returns 130 on Ctrl-C at the prompt and moves nothing |
+| #13 | 混在4状態・確認中の変更・設定変更・ロック・非TTY | #8 の E2E-02/03、E2E-04、E2E-07、config changes after confirmation...、an unsafe state directory or a held lock... |
+| #14 | ID・元パス・退避先・日時・記録状態と照合結果、ID順、restored 履歴 | trash list shows record, check, paths and times in ID order, including restored entries |
+| #14 | prepared の実体4組合せと終了値 | trash list reports the four prepared combinations and exits 1 only for unresolved ones |
+| #14 | 破損recordがあっても残りを表示、store不変 | trash list shows the rest when one record is broken and leaves the store unchanged |
+| #14 | store不在は0件で作成しない。権限不正・symlinkはアクセス失敗として区別 | trash list distinguishes an absent store from an unsafe one and never creates it |
+| #14 | --json / --yes / --config / --ghq / --status / 余分な引数は終了2 | trash list rejects unsupported flags and extra arguments with exit 2 |
+| #15 | ID不足・形式違反・../../ は終了2で操作なし、未知IDは終了1 | restore rejects missing or malformed IDs...; restore of an unknown but well-formed ID exits 1... |
+| #15 | ID・退避先・元パスの確認、承認/拒否/EOF、非TTYは--yes必須 | restore confirms with ID, destination and original; only y/yes proceeds; non-TTY needs --yes |
+| #15 | 既にrestoredは再移動せず履歴を示して終了1 | a second restore does not move again and shows the history with exit 1 |
+| #15 | 元パス衝突・dangling symlink・親不在は上書き/作成しない | restore never overwrites an existing path or creates a missing parent |
+| #15 | 改ざんrecord・曖昧状態は拒否、確定した復旧候補のみ復元 | restore refuses tampered records and ambiguous states but restores a confirmed candidate |
+| #15 | 移動・記録失敗・ロックはIDと案内つき終了1 | restore failures show the ID and recovery guidance and are never reported as success |
+| #15 | Ctrl-C は130 | restore returns 130 on Ctrl-C at the prompt and moves nothing |
+| #15 | オフライン・Git/ghq 不要の復元 | restore needs neither Git, ghq nor the network... |
+| #13-15 | clean → trash list → restore の往復で .git・内容・設定・権限を保持 | clean -> trash list -> restore round trip keeps .git, contents, config and permissions |
+
 ## Issue #8: 統合・配布
 
 | ID / 要件 | テスト（src/commands/integration.test.ts、指定時 core.test.ts） | OS |

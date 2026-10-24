@@ -43,6 +43,10 @@ export interface Entry {
 	readonly original?: string;
 	readonly created_at?: string;
 	readonly updated_at?: string;
+	readonly destination?: string;
+	readonly recorded?: RecordStatus;
+	readonly original_present?: boolean;
+	readonly destination_present?: boolean;
 	readonly status: EntryStatus;
 }
 
@@ -310,15 +314,45 @@ export class TrashStore {
 			},
 		};
 	}
+	// Cheap identity of what list() reads, to notice a store that changes while it is inspected.
+	private async fingerprint(): Promise<string> {
+		const parts: string[] = [];
+		for (const id of (await readdir(this.entries)).sort()) {
+			const record = await lstat(join(this.entry(id), "record.json"), {
+				bigint: true,
+			}).catch(() => null);
+			const payload = await lstat(this.payload(id), { bigint: true }).catch(
+				() => null,
+			);
+			parts.push(
+				`${id}:${record ? `${record.ino}/${record.size}/${record.mtimeNs}` : "-"}:${payload ? payload.ino : "-"}`,
+			);
+		}
+		return parts.join("\n");
+	}
 	async list(): Promise<{
 		readonly entries: readonly Entry[];
 		readonly failed: boolean;
+		readonly unstable: boolean;
 	}> {
 		if (
 			!(await this.directory(this.path, false)) ||
 			!(await this.directory(this.entries, false))
 		)
-			return { entries: [], failed: false };
+			return { entries: [], failed: false, unstable: false };
+		const before = await this.fingerprint();
+		const result = await this.collect();
+		const unstable = (await this.fingerprint()) !== before;
+		return {
+			entries: result.entries,
+			failed: result.failed || unstable,
+			unstable,
+		};
+	}
+	private async collect(): Promise<{
+		readonly entries: readonly Entry[];
+		readonly failed: boolean;
+	}> {
 		const entries: Entry[] = [];
 		let failed = false;
 		for (const id of (await readdir(this.entries)).sort()) {
@@ -334,6 +368,10 @@ export class TrashStore {
 						original: record.original,
 						created_at: record.created_at,
 						updated_at: record.updated_at,
+						destination: record.destination,
+						recorded: record.status,
+						original_present: !(await absent(record.original)),
+						destination_present: !(await absent(record.destination)),
 						status: await this.reconcile(record),
 					};
 				}

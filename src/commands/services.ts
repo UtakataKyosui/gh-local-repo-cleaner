@@ -6,6 +6,7 @@ import { UsageError } from "./arguments.ts";
 export class ServiceError extends Data.TaggedError("ServiceError")<{
 	readonly code: string;
 	readonly detail?: string;
+	readonly output?: string;
 }> {}
 
 // Command-specific use cases connect through this boundary. Missing services fail closed.

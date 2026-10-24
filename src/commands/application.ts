@@ -92,13 +92,24 @@ export async function runCli(
 			code = code || output.exitCode;
 		} else {
 			const result = yield* service.operate(invocation).pipe(
-				Effect.map((message) => ({ message, failed: false })),
+				Effect.map((message) => ({
+					message,
+					output: "",
+					usage: false,
+					failed: false,
+				})),
 				Effect.catch((error) =>
-					Effect.succeed({ message: error.code, failed: true }),
+					Effect.succeed({
+						message: error.detail ?? error.code,
+						output: error.output ?? "",
+						usage: error.code === "CONFIG_OR_TARGET_ERROR",
+						failed: true,
+					}),
 				),
 			);
 			if (result.failed) {
-				code = result.message === "CONFIG_OR_TARGET_ERROR" ? 2 : 1;
+				code = result.usage ? 2 : 1;
+				if (result.output) io.stdout(result.output);
 				io.stderr(result.message);
 			} else io.stdout(result.message);
 		}
