@@ -63,79 +63,83 @@ export const applicationLive = (
 						catch: (error) => error,
 					});
 					const repositories = yield* discover(invocation);
-					const assessments: Assessment[] = [];
-					for (const repository of repositories) {
-						const ruleIndex = patterns.match(repository);
-						const excluded = ruleIndex >= 0;
-						const inspected = yield* inspectRepositorySnapshot({
-							path: repository.path,
-						});
-						const boundary = yield* Effect.tryPromise(
-							async () =>
-								(await realpath(repository.path)) === repository.path &&
-								within(repository.root, repository.path),
-						).pipe(Effect.catch(() => Effect.succeed(false)));
-						const reasons = [...inspected.diagnosis.reasons];
-						if (excluded)
-							reasons.push({
-								...finding("EXCLUDED_BY_CONFIG"),
-								rule_index: ruleIndex,
-							});
-						if (
-							!boundary ||
-							repository.path === homedir() ||
-							repository.path === process.cwd() ||
-							within(repository.path, process.cwd())
-						)
-							reasons.push(finding("UNSUPPORTED_LAYOUT"));
-						const size = yield* Effect.tryPromise((signal) =>
-							sizeBytes(repository.path, signal),
-						).pipe(Effect.catch(() => Effect.succeed(null)));
-						const date = yield* runner
-							.run({
-								executable: "git",
-								args: [
-									"-C",
-									repository.path,
-									"log",
-									"--no-walk",
-									"--format=%ct",
-									"--branches",
-									"HEAD",
-								],
-							})
-							.pipe(
-								Effect.map((value) => {
-									const times = value
-										.trim()
-										.split("\n")
-										.filter(Boolean)
-										.map(Number);
-									if (!times.length) return null;
-									if (times.some((time) => !Number.isFinite(time)))
-										throw new Error("Invalid timestamp");
-									return new Date(Math.max(...times) * 1000).toISOString();
-								}),
-								Effect.catchDefect(() => Effect.succeed(null)),
-								Effect.catch(() => Effect.succeed(null)),
-							);
-						const result = diagnose(repository.path, reasons);
-						assessments.push({
-							repository,
-							status: result.status,
-							reasons: result.reasons,
-							checked_at: now(),
-							metadata: {
-								size_bytes: size,
-								last_commit_at: date,
-								metadata_errors: [
-									...(size === null ? ["SIZE_UNAVAILABLE"] : []),
-									...(date === null ? ["LAST_COMMIT_UNAVAILABLE"] : []),
-								],
-							},
-							snapshot: inspected.snapshot,
-						});
-					}
+					const assessments: Assessment[] = yield* Effect.forEach(
+						repositories,
+						(repository) =>
+							Effect.gen(function* () {
+								const ruleIndex = patterns.match(repository);
+								const excluded = ruleIndex >= 0;
+								const inspected = yield* inspectRepositorySnapshot({
+									path: repository.path,
+								});
+								const boundary = yield* Effect.tryPromise(
+									async () =>
+										(await realpath(repository.path)) === repository.path &&
+										within(repository.root, repository.path),
+								).pipe(Effect.catch(() => Effect.succeed(false)));
+								const reasons = [...inspected.diagnosis.reasons];
+								if (excluded)
+									reasons.push({
+										...finding("EXCLUDED_BY_CONFIG"),
+										rule_index: ruleIndex,
+									});
+								if (
+									!boundary ||
+									repository.path === homedir() ||
+									repository.path === process.cwd() ||
+									within(repository.path, process.cwd())
+								)
+									reasons.push(finding("UNSUPPORTED_LAYOUT"));
+								const size = yield* Effect.tryPromise((signal) =>
+									sizeBytes(repository.path, signal),
+								).pipe(Effect.catch(() => Effect.succeed(null)));
+								const date = yield* runner
+									.run({
+										executable: "git",
+										args: [
+											"-C",
+											repository.path,
+											"log",
+											"--no-walk",
+											"--format=%ct",
+											"--branches",
+											"HEAD",
+										],
+									})
+									.pipe(
+										Effect.map((value) => {
+											const times = value
+												.trim()
+												.split("\n")
+												.filter(Boolean)
+												.map(Number);
+											if (!times.length) return null;
+											if (times.some((time) => !Number.isFinite(time)))
+												throw new Error("Invalid timestamp");
+											return new Date(Math.max(...times) * 1000).toISOString();
+										}),
+										Effect.catchDefect(() => Effect.succeed(null)),
+										Effect.catch(() => Effect.succeed(null)),
+									);
+								const result = diagnose(repository.path, reasons);
+								return {
+									repository,
+									status: result.status,
+									reasons: result.reasons,
+									checked_at: now(),
+									metadata: {
+										size_bytes: size,
+										last_commit_at: date,
+										metadata_errors: [
+											...(size === null ? ["SIZE_UNAVAILABLE"] : []),
+											...(date === null ? ["LAST_COMMIT_UNAVAILABLE"] : []),
+										],
+									},
+									snapshot: inspected.snapshot,
+								};
+							}),
+						{ concurrency: 4 },
+					);
 					// Local remotes must not be evacuated along with repositories relying on them.
 					for (let index = 0; index < assessments.length; index++) {
 						const item = assessments[index];
