@@ -22,6 +22,7 @@ import {
 import { CommandRunner, CommandRunnerLive } from "../executil/command.ts";
 import type { Assessment, Batch } from "../model/assessment.ts";
 import { type Invocation, UsageError } from "./arguments.ts";
+import { cleanText } from "./messages.ts";
 import type { Progress } from "./progress.ts";
 import {
 	Application,
@@ -249,18 +250,8 @@ export const applicationLive = (
 					),
 				);
 
-			const moveNotice =
-				"Moving within one filesystem frees no disk space; the lock does not stop editors, Git or other external writers, so do not run this on repositories in use.";
 			const manual =
 				"Nothing was changed. See the README (退避・復元と復旧) for manual recovery.";
-			const moveHints: Record<string, string> = {
-				STATE_CHANGED: ": changed since inspection; kept in place.",
-				MOVE_FAILED: ": move failed; kept in place (no copy fallback).",
-				RECORD_FAILED:
-					": the record could not be written; kept in place and nothing was moved.",
-				RECORD_FAILED_AFTER_MOVE:
-					": moved, but the record was not finalized; run trash list, then restore <ID> if needed.",
-			};
 			const restoreHints: Record<string, string> = {
 				LOCK_HELD:
 					": another clean or restore is running; nothing was changed. Retry later.",
@@ -427,6 +418,7 @@ export const applicationLive = (
 							);
 							return `Restored ${id} from ${JSON.stringify(entry.destination)} to ${JSON.stringify(entry.original)}.`;
 						}
+						const words = cleanText(invocation.lang);
 						if (!invocation.dryRun && !invocation.yes && !input.tty)
 							throw new UsageError("Non-interactive clean requires --yes");
 						const configBefore = yield* Effect.tryPromise({
@@ -454,14 +446,22 @@ export const applicationLive = (
 							if (item.status !== "SAFE" || !item.snapshot) {
 								count.kept++;
 								messages.push(
-									`Kept ${JSON.stringify(path)}: ${item.status} ${item.reasons.map((reason) => reason.code).join(", ")}`,
+									words.kept(
+										JSON.stringify(path),
+										item.status,
+										item.reasons.map((reason) => reason.code).join(", "),
+									),
 								);
 								continue;
 							}
 							if (invocation.dryRun) {
 								count.would++;
 								messages.push(
-									`Would move ${JSON.stringify(path)} to ${JSON.stringify(destination)} (logical bytes, estimate: ${item.metadata.size_bytes ?? "unknown"}).`,
+									words.wouldMove(
+										JSON.stringify(path),
+										JSON.stringify(destination),
+										item.metadata.size_bytes,
+									),
 								);
 								continue;
 							}
@@ -480,13 +480,13 @@ export const applicationLive = (
 								confirm(
 									invocation,
 									input,
-									`Move ${JSON.stringify(path)} to ${JSON.stringify(destination)}? ${moveNotice}`,
+									`${words.prompt(JSON.stringify(path), JSON.stringify(destination))} ${words.moveNotice}`,
 									signal,
 								),
 							);
 							if (!accepted) {
 								count.skipped++;
-								messages.push(`Skipped ${JSON.stringify(path)}.`);
+								messages.push(words.skipped(JSON.stringify(path)));
 								continue;
 							}
 							const expected = item.snapshot;
@@ -536,7 +536,13 @@ export const applicationLive = (
 							if (outcome.id) {
 								count.moved++;
 								messages.push(
-									`Moved ${JSON.stringify(path)}: ${outcome.id} -> ${JSON.stringify(join(store.path, "entries", outcome.id, "repo"))}`,
+									words.moved(
+										JSON.stringify(path),
+										outcome.id,
+										JSON.stringify(
+											join(store.path, "entries", outcome.id, "repo"),
+										),
+									),
 								);
 								continue;
 							}
@@ -546,37 +552,38 @@ export const applicationLive = (
 							const code =
 								error instanceof TrashError ? error.code : "MOVE_FAILED";
 							messages.push(
-								`${code}${error instanceof TrashError && error.id ? ` ${error.id}` : ""} ${JSON.stringify(path)}${moveHints[code] ?? ""}`,
+								`${code}${error instanceof TrashError && error.id ? ` ${error.id}` : ""} ${JSON.stringify(path)}${words.moveHint(code)}`,
 							);
 							if (code !== "STATE_CHANGED" && code !== "MOVE_FAILED") {
-								messages.push(
-									"Stopped: the state store is not reliable, so remaining repositories were not moved. Run trash list.",
-								);
+								messages.push(words.stopped);
 								break;
 							}
 						}
 						const report = messages.length
 							? [
 									...(count.would + count.moved + count.skipped + count.failed
-										? [`State store: ${JSON.stringify(store.path)}`, moveNotice]
+										? [
+												words.stateStore(JSON.stringify(store.path)),
+												words.moveNotice,
+											]
 										: []),
 									...messages,
 									invocation.dryRun
-										? `Dry run: nothing was moved. Would move ${count.would}; kept ${count.kept}.`
-										: `Moved ${count.moved}; skipped ${count.skipped}; kept ${count.kept}; failed ${count.failed}.`,
-									...(count.moved || count.failed
-										? [
-												"Review with: trash list. Put a repository back with: restore <ID>.",
-											]
-										: []),
+										? words.dryRunSummary(count.would, count.kept)
+										: words.summary(
+												count.moved,
+												count.skipped,
+												count.kept,
+												count.failed,
+											),
+									...(count.moved || count.failed ? [words.review] : []),
 								].join("\n")
-							: "No repositories.";
+							: words.empty;
 						if (failed)
 							return yield* Effect.fail(
 								new ServiceError({
 									code: "CLEAN_INCOMPLETE",
-									detail:
-										"CLEAN_INCOMPLETE: some repositories could not be diagnosed or moved; see the output.",
+									detail: words.incomplete,
 									output: report,
 								}),
 							);
