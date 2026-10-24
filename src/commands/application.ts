@@ -10,7 +10,7 @@ import {
 	normalizeArguments,
 	UsageError,
 } from "./arguments.ts";
-import { failureMessage } from "./messages.ts";
+import { failureMessage, localizeUsage, peekLocale } from "./messages.ts";
 import { present } from "./output.ts";
 import { Application, ApplicationUnavailable } from "./services.ts";
 
@@ -51,7 +51,7 @@ export async function runCli(
 			}
 		} catch (error) {
 			if (!(error instanceof UsageError)) throw error;
-			io.stderr(error.message);
+			io.stderr(localizeUsage(peekLocale(argv), error.message));
 			return 2;
 		}
 	}
@@ -91,7 +91,10 @@ export async function runCli(
 				})),
 				Effect.catch((error) =>
 					Effect.succeed({
-						message: error.detail ?? error.code,
+						message:
+							error.code === "CONFIG_OR_TARGET_ERROR" && error.detail
+								? localizeUsage(invocation.lang, error.detail)
+								: (error.detail ?? error.code),
 						output: error.output ?? "",
 						usage: error.code === "CONFIG_OR_TARGET_ERROR",
 						failed: true,
@@ -264,6 +267,11 @@ export async function runCli(
 								type: "string",
 								description: "Absolute path of the state directory",
 							},
+							{
+								name: "lang",
+								type: "string",
+								description: "Display language of messages: en or ja",
+							},
 						)
 						.action(handler(() => program)),
 			),
@@ -280,11 +288,18 @@ export async function runCli(
 							(child) =>
 								child
 									.provide(appContext())
-									.flags({
-										name: "state-dir",
-										type: "string",
-										description: "Absolute path of the state directory",
-									})
+									.flags(
+										{
+											name: "state-dir",
+											type: "string",
+											description: "Absolute path of the state directory",
+										},
+										{
+											name: "lang",
+											type: "string",
+											description: "Display language of messages: en or ja",
+										},
+									)
 									.action(handler(() => program)),
 						),
 					),
@@ -312,6 +327,11 @@ export async function runCli(
 								name: "state-dir",
 								type: "string",
 								description: "Absolute path of the state directory",
+							},
+							{
+								name: "lang",
+								type: "string",
+								description: "Display language of messages: en or ja",
 							},
 						)
 						.action(handler(() => program)),

@@ -111,3 +111,108 @@ export function describeReason(locale: Locale, reason: Finding) {
 			: "";
 	return `${branch}${actionsJa[reason.code]}`;
 }
+
+// Usage errors are thrown as English text from several layers, so ja is matched on that text.
+const usageJa: readonly (readonly [
+	RegExp,
+	(match: RegExpMatchArray) => string,
+])[] = [
+	[
+		/^Unknown command or directory$/,
+		() => "不明なコマンドまたはディレクトリです。",
+	],
+	[
+		/^Flag is not supported for this command$/,
+		() => "このコマンドでは使えないフラグです。",
+	],
+	[
+		/^Directory and --ghq cannot be combined$/,
+		() => "ディレクトリと --ghq は併用できません。",
+	],
+	[/^Invalid status$/, () => "--status の値が不正です。"],
+	[/^Invalid --group-by value$/, () => "--group-by の値が不正です。"],
+	[/^Invalid --lang value$/, () => "--lang の値が不正です。"],
+	[
+		/^--state-dir requires an absolute path$/,
+		() => "--state-dir には絶対パスが必要です。",
+	],
+	[
+		/^Duplicate or malformed flag$/,
+		() => "フラグが重複しているか、形式が不正です。",
+	],
+	[
+		/^Boolean flag does not accept a value$/,
+		() => "真偽値フラグは値を取りません。",
+	],
+	[/^Flag requires a value$/, () => "フラグには値が必要です。"],
+	[/^Unknown flag$/, () => "未知のフラグです。"],
+	[
+		/^--delete requires a directory shorthand$/,
+		() => "--delete にはディレクトリの省略形が必要です。",
+	],
+	[/^Usage: trash list$/, () => "使い方: trash list"],
+	[/^Too many arguments$/, () => "引数が多すぎます。"],
+	[/^Target required$/, () => "対象の指定が必要です。"],
+	[
+		/^ID must be 32 lowercase hexadecimal characters$/,
+		() => "ID は小文字16進数32文字で指定してください。",
+	],
+	[/^Directory required$/, () => "ディレクトリの指定が必要です。"],
+	[
+		/^Non-interactive restore requires --yes$/,
+		() => "非対話で restore するには --yes が必要です。",
+	],
+	[
+		/^Non-interactive clean requires --yes$/,
+		() => "非対話で clean するには --yes が必要です。",
+	],
+	[
+		/^Non-interactive operation requires --yes$/,
+		() => "非対話で実行するには --yes が必要です。",
+	],
+	[
+		/^Invalid or unreadable configuration$/,
+		() => "設定が不正、または読み取れません。",
+	],
+	[
+		/^Path is not a Git worktree root; specify the repository root itself$/,
+		() =>
+			"パスが Git ワークツリーのルートではありません。リポジトリのルートそのものを指定してください。",
+	],
+	[
+		/^Directory does not exist or is not a directory$/,
+		() => "ディレクトリが存在しないか、ディレクトリではありません。",
+	],
+	[
+		/^No ghq repository is named (".*"); use an absolute path, \.\/ or \.\.\/ for other repositories$/,
+		(m) =>
+			`${m[1]} という名前の ghq リポジトリはありません。他のリポジトリは絶対パス、./、../ で指定してください。`,
+	],
+	[
+		/^Repository name (".*") is ambiguous across ghq roots \((.*)\); specify an absolute path$/,
+		(m) =>
+			`リポジトリ名 ${m[1]} は ghq のルートをまたいで曖昧です (${m[2]})。絶対パスで指定してください。`,
+	],
+];
+
+export function localizeUsage(locale: Locale, message: string) {
+	if (locale === "en") return message;
+	for (const [pattern, translate] of usageJa) {
+		const match = message.match(pattern);
+		if (match) return translate(match);
+	}
+	return message;
+}
+
+// Argument parsing may fail before the invocation exists, so its errors read the flag directly.
+export function peekLocale(argv: readonly string[]): Locale {
+	const end = argv.indexOf("--");
+	const options = argv.slice(0, end < 0 ? argv.length : end);
+	const index = options.findIndex(
+		(arg) => arg === "--lang" || arg.startsWith("--lang="),
+	);
+	const value =
+		options[index]?.split("=")[1] ??
+		(index < 0 ? undefined : options[index + 1]);
+	return locales.find((locale) => locale === value) ?? "en";
+}

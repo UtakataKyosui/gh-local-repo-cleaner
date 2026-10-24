@@ -91,6 +91,7 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 		list: ["--json", "--ghq", "--config", "--status", "--group-by", "--lang"],
 		inspect: ["--json", "--config", "--lang"],
 		clean: [
+			"--lang",
 			"--yes",
 			"--dry-run",
 			"--ghq",
@@ -98,8 +99,8 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 			"--state-dir",
 			"--delete",
 		],
-		trash: ["--state-dir"],
-		restore: ["--yes", "--state-dir"],
+		trash: ["--state-dir", "--lang"],
+		restore: ["--yes", "--state-dir", "--lang"],
 	};
 	for (const flag of flags.keys())
 		if (!allowed[operation].includes(flag))
