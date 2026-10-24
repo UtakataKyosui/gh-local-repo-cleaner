@@ -113,18 +113,39 @@ export async function exclusions(path?: string) {
 	}
 }
 
+const SIZE_CONCURRENCY = 32;
+
 export async function sizeBytes(
 	path: string,
 	signal?: AbortSignal,
 ): Promise<number> {
-	signal?.throwIfAborted();
-	const stat = await lstat(path);
-	if (stat.isSymbolicLink()) return 0;
-	if (stat.isFile()) return stat.size;
-	if (!stat.isDirectory()) throw new Error("Unsupported file type");
-	let size = 0;
-	for (const name of await readdir(path))
-		size += await sizeBytes(join(path, name), signal);
-	if (!Number.isSafeInteger(size)) throw new Error("Size overflow");
-	return size;
+	let active = 0;
+	const waiting: (() => void)[] = [];
+	const limited = async <T>(task: () => Promise<T>): Promise<T> => {
+		if (active >= SIZE_CONCURRENCY)
+			await new Promise<void>((resolve) => waiting.push(resolve));
+		else active++;
+		try {
+			return await task();
+		} finally {
+			const next = waiting.shift();
+			if (next) next();
+			else active--;
+		}
+	};
+	const walk = async (current: string): Promise<number> => {
+		signal?.throwIfAborted();
+		const stat = await limited(() => lstat(current));
+		if (stat.isSymbolicLink()) return 0;
+		if (stat.isFile()) return stat.size;
+		if (!stat.isDirectory()) throw new Error("Unsupported file type");
+		const names = await limited(() => readdir(current));
+		const sizes = await Promise.all(
+			names.map((name) => walk(join(current, name))),
+		);
+		const size = sizes.reduce((sum, value) => sum + value, 0);
+		if (!Number.isSafeInteger(size)) throw new Error("Size overflow");
+		return size;
+	};
+	return walk(path);
 }
