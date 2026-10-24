@@ -91,7 +91,9 @@ test("E2E-02/03 mixed batch continues, clean --yes moves SAFE only", async () =>
 			[dirty, ignored, unknown].map((repo) => snapshot(repo.path)),
 		),
 	).toEqual(before);
-});
+	// Four real repositories plus scan, clean and revalidation exceed Bun's 5s default
+	// on hosted macOS runners. Process timeouts are tested separately.
+}, 15_000);
 
 test("E2E-04 state changed during approval is kept", async () => {
 	let mutate = async () => {};
