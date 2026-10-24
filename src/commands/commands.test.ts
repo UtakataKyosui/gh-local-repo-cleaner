@@ -3,9 +3,13 @@ import { Effect, Layer } from "effect";
 import { finding } from "../core/diagnosis.ts";
 import type { Assessment, Batch } from "../model/assessment.ts";
 import { runCli } from "./application.ts";
-import { normalizeArguments, UsageError } from "./arguments.ts";
+import {
+	type Invocation,
+	normalizeArguments,
+	UsageError,
+} from "./arguments.ts";
 import { present } from "./output.ts";
-import { Application, confirm } from "./services.ts";
+import { Application, confirm, ServiceError } from "./services.ts";
 
 test.each([
 	[[], "scan", undefined],
@@ -17,7 +21,11 @@ test.each([
 	[["inspect", "./-repo"], "inspect", "./-repo"],
 	[["clean", "--dry-run"], "clean", undefined],
 	[["trash", "list"], "trash", undefined],
-	[["restore", "id", "--yes"], "restore", "id"],
+	[
+		["restore", "0123456789abcdef0123456789abcdef", "--yes"],
+		"restore",
+		"0123456789abcdef0123456789abcdef",
+	],
 ] as const)("normalizes %j", (argv, operation, target) => {
 	expect(normalizeArguments(argv)).toMatchObject({ operation, target });
 });
@@ -42,10 +50,49 @@ test.each(
 		["--config"],
 		["--json=true"],
 		["trash", "list", "--config", "x"],
+		...["--status", "--yes", "--dry-run", "--state-dir"].map((flag) =>
+			flag === "--yes" || flag === "--dry-run"
+				? ["scan", flag]
+				: ["scan", flag, "/abs"],
+		),
+		["scan", "dir", "--ghq"],
+		["list", "dir", "--ghq"],
+		["list", "--yes"],
+		["list", "--delete"],
+		["list", "--dry-run"],
+		["list", "--state-dir", "/abs"],
+		["list", "--status"],
+		["list", "--status", ""],
+		["list", "--status="],
+		["list", "--status", "all"],
+		["list", "--status", "safe,dirty"],
+		["list", "--status", "safe", "--status", "safe"],
+		["list", "--status=safe", "--status", "safe"],
+		["inspect", "name", "--ghq"],
+		["inspect", "name", "--status", "safe"],
+		["inspect", "name", "--yes"],
+		["inspect", "name", "--delete"],
+		["inspect", "name", "--dry-run"],
+		["inspect", "name", "--state-dir", "/abs"],
+		["inspect", "a", "b"],
+		["inspect", ""],
+		["inspect", "--json"],
 	].map((argv) => ({ argv })),
 )("rejects invalid arguments %j", ({ argv }) => {
 	expect(() => normalizeArguments(argv)).toThrow(UsageError);
 });
+
+test.each(["safe", "dirty", "protected", "unknown"] as const)(
+	"list accepts --status %s as a single value",
+	(status) => {
+		expect(normalizeArguments(["list", "--status", status])).toMatchObject({
+			status,
+		});
+		expect(normalizeArguments(["list", `--status=${status}`])).toMatchObject({
+			status,
+		});
+	},
+);
 
 function assessment(path: string, status: Assessment["status"]): Assessment {
 	return {
@@ -208,6 +255,116 @@ test("cancellation propagates through Crust and returns 130", async () => {
 		["scan"],
 		{ stdout: () => {}, stderr: () => {} },
 		fake,
+		controller.signal,
+	);
+	setTimeout(() => controller.abort(), 10);
+	expect(await pending).toBe(130);
+});
+
+async function runFake(
+	argv: string[],
+	diagnose: (invocation: Invocation) => Effect.Effect<Batch, ServiceError>,
+) {
+	const stdout: string[] = [],
+		stderr: string[] = [];
+	const code = await runCli(
+		argv,
+		{
+			stdout: (text) => stdout.push(text),
+			stderr: (text) => stderr.push(text),
+		},
+		Layer.succeed(Application, { diagnose, operate: () => Effect.never }),
+	);
+	return { code, stdout: stdout.join("\n"), stderr: stderr.join("\n") };
+}
+
+test("target and configuration failures exit 2 with an explanation in JSON errors and stderr", async () => {
+	const failing = () =>
+		Effect.fail(
+			new ServiceError({
+				code: "CONFIG_OR_TARGET_ERROR",
+				detail: "Repository name is ambiguous",
+			}),
+		);
+	const json = await runFake(["inspect", "x", "--json"], failing);
+	expect(json.code).toBe(2);
+	expect(JSON.parse(json.stdout)).toMatchObject({
+		schema_version: 1,
+		repositories: [],
+		errors: [
+			{
+				code: "CONFIG_OR_TARGET_ERROR",
+				message: "Repository name is ambiguous",
+			},
+		],
+	});
+	const text = await runFake(["inspect", "x"], failing);
+	expect(text.code).toBe(2);
+	expect(text.stderr).toContain("Repository name is ambiguous");
+});
+
+test("enumeration failure exits 1 and an empty result exits 0", async () => {
+	const failed = await runFake(["scan", "--json"], () =>
+		Effect.fail(new ServiceError({ code: "GHQ_NOT_FOUND" })),
+	);
+	expect(failed.code).toBe(1);
+	expect(JSON.parse(failed.stdout).errors[0].message).toContain("ghq");
+	const empty = await runFake(["scan"], () =>
+		Effect.succeed({ assessments: [], errors: [] }),
+	);
+	expect(empty.code).toBe(0);
+	expect(empty.stdout).toContain("Scanned 0; returned 0");
+});
+
+test("exit code follows the full diagnosis for every status mix", async () => {
+	for (const [statuses, expected] of [
+		[["SAFE"], 0],
+		[["DIRTY", "PROTECTED"], 0],
+		[["SAFE", "UNKNOWN"], 1],
+	] as const) {
+		const result = await runFake(["list", "--status", "safe"], () =>
+			Effect.succeed({
+				assessments: statuses.map((status, index) =>
+					assessment(`/test/${index}`, status),
+				),
+				errors: [],
+			}),
+		);
+		expect(result.code).toBe(expected);
+	}
+});
+
+test("text output separates diagnosed and returned counts and inspect shows its source", () => {
+	const batch: Batch = {
+		assessments: [
+			assessment("/test/a", "SAFE"),
+			assessment("/test/b", "UNKNOWN"),
+		],
+		errors: [],
+	};
+	const list = present(batch, normalizeArguments(["list", "--status", "safe"]));
+	expect(list.stdout).toContain(
+		"Scanned 2; returned 1; SAFE 1; DIRTY 0; PROTECTED 0; UNKNOWN 1",
+	);
+	const inspect = present(
+		{ assessments: [batch.assessments[1] as Assessment], errors: [] },
+		normalizeArguments(["inspect", "/test/b"]),
+	);
+	expect(inspect.stdout).toContain('Source: directory; root: "/test"');
+	expect(inspect.stdout).toContain("Checked at: 2026-01-01T00:00:00Z");
+	expect(inspect.stdout).toContain("LOCAL_INSPECTION_FAILED");
+	expect(inspect.stdout).toContain("Resolve the inspection failure");
+});
+
+test("cancellation during inspect returns 130", async () => {
+	const controller = new AbortController();
+	const pending = runCli(
+		["inspect", "name"],
+		{ stdout: () => {}, stderr: () => {} },
+		Layer.succeed(Application, {
+			diagnose: () => Effect.never,
+			operate: () => Effect.never,
+		}),
 		controller.signal,
 	);
 	setTimeout(() => controller.abort(), 10);

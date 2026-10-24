@@ -71,6 +71,8 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 	const target = positional[0];
 	if (["inspect", "restore"].includes(operation) && !target)
 		throw new UsageError("Target required");
+	if (operation === "restore" && !/^[0-9a-f]{32}$/.test(target ?? ""))
+		throw new UsageError("ID must be 32 lowercase hexadecimal characters");
 	if (flags.has("--delete") && !target)
 		throw new UsageError("Directory required");
 	const allowed: Record<Operation, readonly string[]> = {

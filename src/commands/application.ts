@@ -18,6 +18,15 @@ interface IO {
 	readonly stderr: (text: string) => void;
 }
 
+const failureMessages: Record<string, string> = {
+	SERVICE_NOT_CONNECTED: "Required application service is unavailable.",
+	GHQ_NOT_FOUND: "ghq was not found; install ghq or specify a directory.",
+	GHQ_TIMEOUT: "ghq timed out while listing repositories.",
+	GHQ_COMMAND_FAILED: "ghq failed while listing repositories.",
+	DISCOVERY_FAILED: "Repository enumeration failed.",
+	CONFIG_OR_TARGET_ERROR: "Invalid configuration or target.",
+};
+
 export async function runCli(
 	argv: readonly string[],
 	io: IO,
@@ -67,7 +76,10 @@ export async function runCli(
 							errors: [
 								{
 									code: error.code,
-									message: "Required application service is unavailable.",
+									message:
+										error.detail ??
+										failureMessages[error.code] ??
+										"Diagnosis failed.",
 								},
 							],
 						};
@@ -80,13 +92,24 @@ export async function runCli(
 			code = code || output.exitCode;
 		} else {
 			const result = yield* service.operate(invocation).pipe(
-				Effect.map((message) => ({ message, failed: false })),
+				Effect.map((message) => ({
+					message,
+					output: "",
+					usage: false,
+					failed: false,
+				})),
 				Effect.catch((error) =>
-					Effect.succeed({ message: error.code, failed: true }),
+					Effect.succeed({
+						message: error.detail ?? error.code,
+						output: error.output ?? "",
+						usage: error.code === "CONFIG_OR_TARGET_ERROR",
+						failed: true,
+					}),
 				),
 			);
 			if (result.failed) {
-				code = result.message === "CONFIG_OR_TARGET_ERROR" ? 2 : 1;
+				code = result.usage ? 2 : 1;
+				if (result.output) io.stdout(result.output);
 				io.stderr(result.message);
 			} else io.stdout(result.message);
 		}

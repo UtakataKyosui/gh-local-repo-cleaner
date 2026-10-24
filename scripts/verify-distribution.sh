@@ -50,7 +50,7 @@ test ! -e "$sandbox/absent-state"
 state="$sandbox/state-smoke"
 env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner clean "$sandbox/repositories" --yes --state-dir "$state"
 test ! -e "$sandbox/repositories/repo"
-env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner trash list --state-dir "$state" | grep -q ' moved '
+env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner trash list --state-dir "$state" | grep -Eq '^[0-9a-f]{32} moved$'
 id=$(basename "$state"/entries/*)
 env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner restore "$id" --yes --state-dir "$state"
 test -f "$sandbox/repositories/repo/tracked"
