@@ -12,10 +12,10 @@ import {
 	readFile,
 	realpath,
 	rename,
-	rmdir,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { within } from "./discovery.ts";
+import { acquireExclusiveLock, renameNoReplace } from "./platform.ts";
 import { type Snapshot, snapshot } from "./snapshot.ts";
 
 interface RecordData {
@@ -48,7 +48,7 @@ async function absent(path: string): Promise<boolean> {
 export class TrashStore {
 	constructor(
 		readonly path: string,
-		private readonly move = rename,
+		private readonly move = renameNoReplace,
 		private readonly now = () => new Date().toISOString(),
 		private readonly beforeSave: (
 			status: string,
@@ -154,12 +154,11 @@ export class TrashStore {
 	}
 	private async locked<A>(action: () => Promise<A>): Promise<A> {
 		await this.directory(true);
-		const lock = join(this.path, ".lock");
-		await mkdir(lock, { mode: 0o700 });
+		const lock = await acquireExclusiveLock(join(this.path, "lock"));
 		try {
 			return await action();
 		} finally {
-			await rmdir(lock);
+			await lock.release();
 		}
 	}
 	async list(): Promise<{
@@ -172,7 +171,7 @@ export class TrashStore {
 	}> {
 		if (!(await this.directory(false))) return { entries: [], failed: false };
 		const entries: { id: string; original?: string; status: string }[] = [];
-		let failed = !(await absent(join(this.path, ".lock")));
+		let failed = false;
 		for (const name of (await readdir(this.path)).sort()) {
 			if (
 				idPattern.test(name) &&
@@ -274,24 +273,7 @@ export class TrashStore {
 				!(await absent(record.original))
 			)
 				throw new Error("Restore collision or unsafe parent");
-			// An exclusive reservation rejects existing empty directories as well as files.
-			await mkdir(record.original, { mode: 0o700 });
-			const reservation = await lstat(record.original);
-			try {
-				const current = await lstat(record.original);
-				if (
-					current.ino !== reservation.ino ||
-					current.dev !== reservation.dev ||
-					!current.isDirectory()
-				)
-					throw new Error("Restore destination changed");
-				await this.move(payload, record.original);
-			} catch (error) {
-				const current = await lstat(record.original).catch(() => null);
-				if (current?.ino === reservation.ino && current.dev === reservation.dev)
-					await rmdir(record.original).catch(() => {});
-				throw error;
-			}
+			await this.move(payload, record.original);
 			await this.save({ ...record, status: "restored" });
 		});
 	}
