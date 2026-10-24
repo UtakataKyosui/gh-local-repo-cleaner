@@ -21,6 +21,7 @@ import {
 import { CommandRunner, CommandRunnerLive } from "../executil/command.ts";
 import type { Assessment, Batch } from "../model/assessment.ts";
 import { type Invocation, UsageError } from "./arguments.ts";
+import type { Progress } from "./progress.ts";
 import {
 	Application,
 	type Confirmation,
@@ -50,6 +51,7 @@ export const applicationLive = (
 	now = () => new Date().toISOString(),
 	runnerLayer: Layer.Layer<CommandRunner> = CommandRunnerLive,
 	createStore: (path: string) => TrashStore = (path) => new TrashStore(path),
+	progress?: Progress,
 ) =>
 	Layer.effect(
 		Application,
@@ -63,6 +65,8 @@ export const applicationLive = (
 						catch: (error) => error,
 					});
 					const repositories = yield* discover(invocation);
+					let completed = 0;
+					progress?.update(0, repositories.length);
 					const assessments: Assessment[] = yield* Effect.forEach(
 						repositories,
 						(repository) =>
@@ -137,9 +141,15 @@ export const applicationLive = (
 									},
 									snapshot: inspected.snapshot,
 								};
-							}),
+							}).pipe(
+								Effect.ensuring(
+									Effect.sync(() =>
+										progress?.update(++completed, repositories.length),
+									),
+								),
+							),
 						{ concurrency: 4 },
-					);
+					).pipe(Effect.ensuring(Effect.sync(() => progress?.finish())));
 					// Local remotes must not be evacuated along with repositories relying on them.
 					for (let index = 0; index < assessments.length; index++) {
 						const item = assessments[index];

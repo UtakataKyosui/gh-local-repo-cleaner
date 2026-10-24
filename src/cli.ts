@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { runCli } from "./commands/application.ts";
 import { applicationLive } from "./commands/live.ts";
+import { gauge } from "./commands/progress.ts";
 
 const controller = new AbortController();
 const cancel = () => controller.abort();
@@ -15,7 +16,13 @@ try {
 				!process.env.NO_COLOR &&
 				(Boolean(process.env.FORCE_COLOR) || Boolean(process.stdout.isTTY)),
 		},
-		applicationLive(),
+		applicationLive(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			process.stderr.isTTY ? gauge(process.stderr) : undefined,
+		),
 		controller.signal,
 	);
 } finally {

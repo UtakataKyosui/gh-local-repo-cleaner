@@ -9,6 +9,7 @@ import {
 	UsageError,
 } from "./arguments.ts";
 import { present } from "./output.ts";
+import { gauge } from "./progress.ts";
 import { Application, confirm, ServiceError } from "./services.ts";
 
 test.each([
@@ -382,4 +383,15 @@ test("cancellation during inspect returns 130", async () => {
 	);
 	setTimeout(() => controller.abort(), 10);
 	expect(await pending).toBe(130);
+});
+
+test("progress gauge draws a bar and clears the line on finish", () => {
+	const writes: string[] = [];
+	const progress = gauge({ write: (text) => writes.push(text) });
+	progress.finish();
+	expect(writes).toEqual([]);
+	progress.update(1, 2);
+	expect(writes[0]).toContain("1/2 (50%)");
+	progress.finish();
+	expect(writes.at(-1)).toBe("\r\x1b[2K");
 });
