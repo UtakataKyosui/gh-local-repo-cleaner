@@ -80,16 +80,29 @@ remote は Git の `remote get-url` で `url.*.insteadOf` 展開後の URL を�
 
 ## 除外と出力
 
-`--config PATH` を `scan` / `list` / `inspect` / `clean` に指定します。
-設定を明示しない場合は追加除外なしです。不正・読み取り不能な設定では操作を開始しません。
+`scan` / `list` / `inspect` / `clean` は既定で
+`$XDG_CONFIG_HOME/gh-local-repo-cleaner/config.json` を読みます。
+`XDG_CONFIG_HOME` 未指定時は `~/.config` を使い、`--config PATH` でファイルを置換できます。
+既定ファイルの不在のみ空設定です。明示ファイルの不在、読み取り失敗、不正JSON、未知キー・version・不正パターンは終了2です。
 
 ```json
-{ "exclude": ["github.com/company/*", "/absolute/path/to/repository"] }
+{
+  "version": 1,
+  "exclude": [
+    {"kind": "name", "pattern": "github.com/company/*"},
+    {"kind": "path", "value": "/absolute/path/to/repository"}
+  ]
+}
 ```
 
-`exclude` は空でない文字列の配列です。他のキーは受け付けません。
-各パターンを Bun.Glob で正規化絶対パスまたは管理名に照合し、一致は PROTECTED です。
-設定から任意コマンドは実行しません。
+`name` は管理名全体へのglobです。`*` は `/` 以外の0文字以上、`?` は1文字、
+`[abc]` / `[a-z]` / `[^abc]` は文字クラス（`/` には一致しません）、
+バックスラッシュは次の文字のエスケープです。`**` に再帰の意味はありません。
+壊れた文字クラス・末尾エスケープは拒否します。
+`path` は正規化した絶対パスへの完全一致です。相対パス・`~`・環境変数の展開は行いません。
+directoryモードの管理名は指定ルート直下の相対名です。JSONの `source` / `root` で識別できます。
+一致は `PROTECTED / EXCLUDED_BY_CONFIG` と0始まりの `rule_index` を返し、`--yes` でも解除しません。
+cleanは移動直前に設定を再読込し、内容変更・エラー時は停止します。
 
 `--json` は `scan` / `list` / `inspect` のみ対応します。stdout は単一の JSON
 オブジェクトで `schema_version: 1`、`repositories`、`summary`、`errors` を持ちます。
@@ -99,8 +112,19 @@ remote は Git の `remote get-url` で `url.*.insteadOf` 展開後の URL を�
 `list --status` の summary と終了値はフィルター前の全件から算出します。
 
 容量は `.git` と ignored を含む論理サイズの概算です。symlink は辿らず、
-取得不能は `null` です。同一ファイルシステム内の退避は空き容量を増やしません。
-最終コミット日時は活動の有無を保証せず、取得不能は `null` です。
+通常ファイルのみを数え、hardlinkは各パスで加算します。
+取得不能は `size_bytes: null` と `metadata_errors` で表し、部分値を総量として返しません。
+SAFEの既知サイズ合計 `safe_size_bytes_estimate` と欠損数 `safe_size_unknown_count` をJSONのsummaryに出します。
+同一ファイルシステム内の退避は空き容量を増やしません。
+`last_commit_at` は全ローカルブランチtipとHEADのcommitter timestampの最大値（UTC RFC3339）です。
+コミットなし・取得不能は `null`。ファイル更新日時や作業の有無は表さず、メタデータのみの取得失敗は安全判定を変更しません。
+
+オンライン検証は隔離した一時bareストアで各remoteの現在のheads/tagsを取得し、取得前後のrefsと照合します。
+独自refs・古いtracking refs・upstream設定だけは保全の証拠にしません。
+各ブランチの未保全コミット数は理由の `branch` / `commit_count` に出します。
+remote変更は `REMOTE_CHANGED_DURING_SCAN`、検証失敗は `REMOTE_VERIFICATION_FAILED` です。
+許可transportはローカルパス・file・https・http・ssh（scp形式を含む）・gitに固定し、helper/extは拒否します。
+認証対話を禁止しtimeoutを適用します。`checked_at` は検証時点であり、その後のremote変更は保証しません。
 
 終了値は `0`=完了（DIRTY / PROTECTED / 拒否を含む）、`1`=UNKNOWN または操作失敗、
 `2`=引数・設定エラー、`130`=キャンセルです。

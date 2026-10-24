@@ -11,9 +11,14 @@ import {
 } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Effect, Layer } from "effect";
 import { snapshot } from "../core/snapshot.ts";
 import { TrashStore } from "../core/trash.ts";
-import { makeCommandRunner } from "../executil/command.ts";
+import {
+	CommandError,
+	CommandRunner,
+	makeCommandRunner,
+} from "../executil/command.ts";
 import { fixture } from "../testing/fixture.ts";
 import { runCli } from "./application.ts";
 import { applicationLive } from "./live.ts";
@@ -206,7 +211,7 @@ test("E2E-12 local remote inside target set protects dependent repositories", as
 		b = await f.repository("b");
 	await f.git(a.path, "remote", "set-url", "origin", b.path);
 	const result = await f.run("clean", f.root, "--yes", "--state-dir", f.store);
-	expect(result.stdout).toContain("REMOTE_DEPENDENCY");
+	expect(result.stdout).toContain("LOCAL_REMOTE_DEPENDENCY");
 	expect(await lstat(a.path)).toBeDefined();
 	expect(await lstat(b.path)).toBeDefined();
 });
@@ -215,7 +220,13 @@ test("exclusion configuration, symlink escapes and injected EXDEV never move sou
 	const f = await setup();
 	const repo = await f.repository("excluded");
 	const config = join(f.base, "exclude.json");
-	await writeFile(config, JSON.stringify({ exclude: ["excluded"] }));
+	await writeFile(
+		config,
+		JSON.stringify({
+			version: 1,
+			exclude: [{ kind: "name", pattern: "excluded" }],
+		}),
+	);
 	expect(
 		(
 			await f.run(
@@ -487,7 +498,7 @@ test.each(["path", "symlink", "file-url"] as const)(
 			expect(repository.status).toBe("PROTECTED");
 			expect(
 				repository.reasons.map((reason: { code: string }) => reason.code),
-			).toContain("REMOTE_DEPENDENCY");
+			).toContain("LOCAL_REMOTE_DEPENDENCY");
 		}
 		expect(
 			(await f.run("clean", f.root, "--yes", "--state-dir", f.store)).code,
@@ -543,4 +554,131 @@ test("unresolved remote dependency graph prevents moving otherwise SAFE targets"
 		before,
 	);
 	expect(await lstat(f.store).catch(() => null)).toBeNull();
+});
+
+test("config changes after confirmation stop clean even when the repository remains unexcluded", async () => {
+	let mutate = async () => {};
+	const f = await setup({
+		tty: true,
+		read: async () => {
+			await mutate();
+			return "yes";
+		},
+	});
+	const repo = await f.repository("config-change");
+	const config = join(f.base, "config.json");
+	await writeFile(config, JSON.stringify({ version: 1, exclude: [] }));
+	mutate = () =>
+		writeFile(
+			config,
+			JSON.stringify({
+				version: 1,
+				exclude: [{ kind: "name", pattern: "unrelated" }],
+			}),
+		);
+	expect(
+		(await f.run("clean", f.root, "--config", config, "--state-dir", f.store))
+			.code,
+	).toBe(1);
+	expect(await lstat(repo.path)).toBeDefined();
+});
+
+test("nested ignored repositories are protected; directory scans never enumerate grandchildren", async () => {
+	const f = await setup();
+	const repo = await f.repository("parent");
+	await writeFile(join(repo.path, ".git", "info", "exclude"), "nested/\n");
+	const nested = join(repo.path, "nested");
+	await mkdir(nested);
+	await f.git(nested, "init");
+	const result = JSON.parse((await f.run("scan", f.root, "--json")).stdout);
+	expect(result.repositories).toHaveLength(1);
+	expect(
+		result.repositories[0].reasons.map((r: { code: string }) => r.code),
+	).toContain("NESTED_REPOSITORY");
+	expect(
+		(await f.run("clean", f.root, "--yes", "--state-dir", f.store)).stdout,
+	).toContain("PROTECTED");
+});
+
+test("metadata uses maximum branch/HEAD committer date, reports nulls, and text displays estimates", async () => {
+	const f = await setup();
+	const repo = await f.repository("metadata");
+	// A commit-tree fixture sets committer time without changing the checked-out branch.
+	const tree = (await f.git(repo.path, "rev-parse", "HEAD^{tree}")).trim();
+	const parent = (await f.git(repo.path, "rev-parse", "HEAD")).trim();
+	const child = Bun.spawn(
+		[
+			"git",
+			"-C",
+			repo.path,
+			"commit-tree",
+			tree,
+			"-p",
+			parent,
+			"-m",
+			"future branch",
+		],
+		{
+			env: {
+				...f.env,
+				GIT_AUTHOR_DATE: "2030-01-02T03:04:05Z",
+				GIT_COMMITTER_DATE: "2030-01-02T03:04:05Z",
+			},
+			stdout: "pipe",
+			stderr: "pipe",
+		},
+	);
+	const commit = (await new Response(child.stdout).text()).trim();
+	expect(await child.exited).toBe(0);
+	await f.git(repo.path, "update-ref", "refs/heads/future", commit);
+	const json = JSON.parse((await f.run("scan", f.root, "--json")).stdout);
+	expect(json.repositories[0].metadata.last_commit_at).toBe(
+		"2030-01-02T03:04:05.000Z",
+	);
+	expect(json.repositories[0].metadata.size_bytes).toBeGreaterThan(0);
+	expect(json.repositories[0].metadata.metadata_errors).toEqual([]);
+	expect((await f.run("scan", f.root)).stdout).toContain(
+		"Logical bytes (estimate)",
+	);
+	const empty = join(f.root, "empty");
+	await mkdir(empty);
+	await f.git(empty, "init");
+	const emptyJson = JSON.parse((await f.run("inspect", empty, "--json")).stdout)
+		.repositories[0];
+	expect(emptyJson.metadata.last_commit_at).toBeNull();
+	expect(emptyJson.metadata.metadata_errors).toContain(
+		"LAST_COMMIT_UNAVAILABLE",
+	);
+});
+
+test("metadata date failure leaves a verified repository SAFE and JSON reports null/error", async () => {
+	const f = await setup();
+	await f.repository("date-failure");
+	const runner = Layer.effect(
+		CommandRunner,
+		Effect.gen(function* () {
+			const delegate = yield* CommandRunner;
+			return {
+				run: (request: Parameters<typeof delegate.run>[0]) =>
+					request.args.includes("log")
+						? Effect.fail(new CommandError({ kind: "exit", exitCode: 128 }))
+						: delegate.run(request),
+			};
+		}),
+	).pipe(Layer.provide(f.runner));
+	const output: string[] = [];
+	const code = await runCli(
+		["scan", f.root, "--json"],
+		{ stdout: (text) => output.push(text), stderr: () => {} },
+		applicationLive(undefined, undefined, runner),
+	);
+	const json = JSON.parse(output.join(""));
+	expect(code).toBe(0);
+	expect(json.repositories[0].status).toBe("SAFE");
+	expect(json.repositories[0].metadata.last_commit_at).toBeNull();
+	expect(json.repositories[0].metadata.metadata_errors).toEqual([
+		"LAST_COMMIT_UNAVAILABLE",
+	]);
+	expect(json.summary.safe_size_bytes_estimate).toBeGreaterThan(0);
+	expect(json.summary.safe_size_unknown_count).toBe(0);
 });

@@ -28,9 +28,7 @@ export const discover = (invocation: Invocation) =>
 	Effect.gen(function* () {
 		const runner = yield* CommandRunner;
 		if (invocation.target && invocation.operation !== "inspect") {
-			const root = yield* Effect.tryPromise(() =>
-				realpath(resolve(invocation.target ?? ".")),
-			);
+			const root = resolve(invocation.target);
 			const names = yield* Effect.tryPromise(() => readdir(root));
 			const repositories: Repository[] = [];
 			for (const name of names.sort()) {
@@ -46,10 +44,22 @@ export const discover = (invocation: Invocation) =>
 							)
 						)
 							return false;
-						throw error;
+						return true; // Diagnose this inaccessible candidate individually.
 					}
 				});
-				if (candidate)
+				const bare =
+					!candidate &&
+					(yield* Effect.tryPromise(async () => {
+						try {
+							return (
+								(await lstat(join(path, "HEAD"))).isFile() &&
+								(await lstat(join(path, "objects"))).isDirectory()
+							);
+						} catch {
+							return false;
+						}
+					}));
+				if (candidate || bare)
 					repositories.push({ source: "directory", root, path, name });
 			}
 			return repositories;
@@ -71,14 +81,40 @@ export const discover = (invocation: Invocation) =>
 				},
 			];
 		}
-		const rootsOutput = yield* runner.run({
-			executable: "ghq",
-			args: ["root", "--all"],
-		});
-		const pathsOutput = yield* runner.run({
-			executable: "ghq",
-			args: ["list", "--full-path"],
-		});
+		const rootsOutput = yield* runner
+			.run({
+				executable: "ghq",
+				args: ["root", "--all"],
+			})
+			.pipe(
+				Effect.mapError(
+					(error) =>
+						new Error(
+							error.kind === "spawn"
+								? "GHQ_NOT_FOUND"
+								: error.kind === "timeout"
+									? "GHQ_TIMEOUT"
+									: "GHQ_COMMAND_FAILED",
+						),
+				),
+			);
+		const pathsOutput = yield* runner
+			.run({
+				executable: "ghq",
+				args: ["list", "--full-path"],
+			})
+			.pipe(
+				Effect.mapError(
+					(error) =>
+						new Error(
+							error.kind === "spawn"
+								? "GHQ_NOT_FOUND"
+								: error.kind === "timeout"
+									? "GHQ_TIMEOUT"
+									: "GHQ_COMMAND_FAILED",
+						),
+				),
+			);
 		const lines = (value: string) => {
 			if (value === "") return [];
 			if (!value.endsWith("\n")) throw new Error("Invalid ghq output");
@@ -93,21 +129,35 @@ export const discover = (invocation: Invocation) =>
 			return [...new Set(paths)];
 		};
 		const roots: string[] = [];
-		for (const root of lines(rootsOutput))
-			roots.push(yield* Effect.tryPromise(() => realpath(root)));
-		if (!roots.length) throw new Error("No ghq roots");
+		for (const root of lines(rootsOutput)) {
+			yield* Effect.tryPromise(async () => {
+				const actual = await realpath(root);
+				if (!(await lstat(actual)).isDirectory())
+					throw new Error("Invalid ghq root");
+			});
+			roots.push(resolve(root));
+		}
+		const fallbackRoot = roots[0];
+		if (!fallbackRoot) throw new Error("No ghq roots");
 		const repositories: Repository[] = [];
-		for (const path of lines(pathsOutput)) {
+		const seen = new Set<string>();
+		for (const raw of lines(pathsOutput)) {
+			const path = resolve(raw);
 			const root = [...roots]
 				.sort((a, b) => b.length - a.length)
 				.find((root) => within(root, resolve(path)));
-			if (!root || resolve(path) !== path)
-				throw new Error("Invalid ghq boundary");
+			const identity = yield* Effect.tryPromise(() => realpath(path)).pipe(
+				Effect.catch(() => Effect.succeed(path)),
+			);
+			if (seen.has(identity)) continue;
+			seen.add(identity);
 			repositories.push({
 				source: "ghq",
-				root,
+				root: root ?? fallbackRoot,
 				path,
-				name: relative(root, path),
+				name: relative(root ?? fallbackRoot, path)
+					.split(sep)
+					.join("/"),
 			});
 		}
 		if (invocation.operation === "inspect") {

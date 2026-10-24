@@ -244,8 +244,8 @@ test("clean-looking repository remains UNKNOWN without online verification", asy
 	expect(result.reasons.map((r) => r.code)).toEqual([
 		"ONLINE_NOT_VERIFIED",
 		"REFLOG_ONLY_COMMITS",
-		"UPSTREAM_MISSING",
 		"NO_REMOTE",
+		"REMOTE_MISSING",
 	]);
 });
 
@@ -328,7 +328,7 @@ test("gitlinks and bare repositories cannot be treated as ordinary repositories"
 	temporary.push(bare);
 	await git(bare, "init", "--bare");
 	const result = await inspect(bare);
-	expect(result.status).toBe("UNKNOWN");
+	expect(result.status).toBe("PROTECTED");
 	expect(result.reasons.map((r) => r.code)).toContain("UNSUPPORTED_LAYOUT");
 });
 
@@ -472,4 +472,123 @@ test("a concurrent write invalidates the inspection snapshot", async () => {
 		),
 	);
 	expect(result.reasons.map((r) => r.code)).toContain("STATE_CHANGED");
+});
+
+test("all branches report unique unpreserved commits independently of checked-out HEAD", async () => {
+	const { path } = await publishedRepository();
+	await git(path, "checkout", "-b", "private");
+	await writeFile(join(path, "tracked"), "private");
+	await git(path, "commit", "-am", "private");
+	await git(path, "checkout", "main");
+	const result = await inspect(path);
+	expect(result.status).toBe("DIRTY");
+	expect(
+		result.reasons.find((r) => r.code === "UNPUSHED_COMMITS"),
+	).toMatchObject({ branch: "refs/heads/private", commit_count: 1 });
+});
+
+test("current remote heads/tags union preserves detached HEAD; one failed remote prevents SAFE", async () => {
+	const { path, remote } = await publishedRepository();
+	await git(path, "checkout", "--detach");
+	expect((await inspect(path)).status).toBe("SAFE");
+	await writeFile(join(path, "tracked"), "detached private");
+	await git(path, "commit", "-am", "detached private");
+	expect((await inspect(path)).status).toBe("DIRTY");
+	expect((await inspect(path)).reasons.map((r) => r.code)).toContain(
+		"DETACHED_HEAD_ONLY_COMMITS",
+	);
+	await git(path, "remote", "add", "second", remote);
+	await git(path, "push", "second", "HEAD:refs/heads/detached");
+	expect((await inspect(path)).status).toBe("SAFE");
+	await git(path, "remote", "set-url", "second", join(path, "absent"));
+	expect((await inspect(path)).status).toBe("UNKNOWN");
+});
+
+test("custom remote refs are never evidence and deleted upstreams stay protected even with another backup", async () => {
+	const { path, remote } = await publishedRepository();
+	const head = (await git(path, "rev-parse", "HEAD")).trim();
+	await git(remote, "update-ref", "refs/archive/main", head);
+	await git(remote, "update-ref", "-d", "refs/heads/main");
+	let result = await inspect(path);
+	expect(result.reasons.map((r) => r.code)).toContain("UNPUSHED_COMMITS");
+	await git(remote, "update-ref", "refs/heads/backup", head);
+	result = await inspect(path);
+	expect(result.reasons.map((r) => r.code)).toContain("UPSTREAM_MISSING");
+	expect(result.status).toBe("PROTECTED");
+});
+
+test("unsupported helpers are rejected explicitly without exposing URL credentials", async () => {
+	const { path } = await publishedRepository();
+	await git(
+		path,
+		"remote",
+		"set-url",
+		"origin",
+		"ext::secret-credential-command",
+	);
+	const result = await inspect(path);
+	expect(result.reasons.map((r) => r.code)).toContain("UNSUPPORTED_TRANSPORT");
+	expect(JSON.stringify(result)).not.toContain("secret-credential");
+});
+
+test("remote refs changing during fetch yield UNKNOWN and leave source snapshot unchanged", async () => {
+	const { path, remote } = await publishedRepository();
+	await writeFile(join(path, "tracked"), "second");
+	await git(path, "commit", "-am", "second");
+	await git(path, "push");
+	const parent = (await git(path, "rev-parse", "HEAD~1")).trim();
+	const before = await Effect.runPromise(
+		inspectRepositorySnapshot({ path }).pipe(Effect.provide(CoreLive)),
+	);
+	let changed = false;
+	const racingRunner = Layer.effect(
+		CommandRunner,
+		Effect.gen(function* () {
+			const runner = yield* CommandRunner;
+			return {
+				run: (request: Parameters<typeof runner.run>[0]) =>
+					runner.run(request).pipe(
+						Effect.tap(() => {
+							if (!changed && request.args.includes("fetch")) {
+								changed = true;
+								return Effect.tryPromise({
+									try: () =>
+										git(remote, "update-ref", "refs/heads/main", parent),
+									catch: () => new CommandError({ kind: "exit", exitCode: 1 }),
+								});
+							}
+							return Effect.succeed(undefined);
+						}),
+					),
+			};
+		}),
+	).pipe(Layer.provide(CommandRunnerLive));
+	const result = await Effect.runPromise(
+		inspectRepositorySnapshot({ path }).pipe(
+			Effect.provide(RepositoryInspectorLive.pipe(Layer.provide(racingRunner))),
+		),
+	);
+	expect(result.diagnosis.status).toBe("UNKNOWN");
+	expect(result.diagnosis.reasons.map((r) => r.code)).toContain(
+		"REMOTE_CHANGED_DURING_SCAN",
+	);
+	expect(result.snapshot).toEqual(before.snapshot);
+});
+
+test("broken gitdir files and parent-owned subdirectories cannot become SAFE", async () => {
+	const broken = await realpath(
+		await mkdtemp(join(tmpdir(), "broken-gitdir-")),
+	);
+	temporary.push(broken);
+	await writeFile(
+		join(broken, ".git"),
+		"gitdir: /missing/cleaner-test-gitdir\n",
+	);
+	expect((await inspect(broken)).status).toBe("UNKNOWN");
+	const { path } = await publishedRepository();
+	const child = join(path, "child");
+	await mkdir(child);
+	const result = await inspect(child);
+	expect(result.status).not.toBe("SAFE");
+	expect(result.reasons.map((r) => r.code)).toContain("UNSUPPORTED_LAYOUT");
 });

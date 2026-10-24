@@ -37,10 +37,17 @@ export const verifyRemoteObjects = (path: string) =>
 		);
 		yield* git("init", "--bare", directory);
 		const remotes = yield* effectiveRemotes(path);
-		if (remotes.length === 0) throw new Error("No remote");
+		if (remotes.length === 0) throw new Error("REMOTE_MISSING");
 		const tags = new Map<string, Set<string>>();
+		const heads = new Map<string, Set<string>>();
+		const advertised = (output: string) =>
+			new Map(
+				[...remoteRefs(output)].filter(([ref]) =>
+					/^refs\/(heads|tags)\//.test(ref),
+				),
+			);
 		for (const [index, { url }] of remotes.entries()) {
-			const before = remoteRefs(yield* git("ls-remote", "--refs", "--", url));
+			const before = advertised(yield* git("ls-remote", "--refs", "--", url));
 			yield* git(
 				"--git-dir",
 				directory,
@@ -52,13 +59,14 @@ export const verifyRemoteObjects = (path: string) =>
 				"--force",
 				"--",
 				url,
-				`+refs/*:refs/verified/${index}/*`,
+				`+refs/heads/*:refs/verified/${index}/heads/*`,
+				`+refs/tags/*:refs/verified/${index}/tags/*`,
 			);
-			const after = remoteRefs(yield* git("ls-remote", "--refs", "--", url));
+			const after = advertised(yield* git("ls-remote", "--refs", "--", url));
 			if (
 				JSON.stringify([...before].sort()) !== JSON.stringify([...after].sort())
 			)
-				throw new Error("Remote changed");
+				throw new Error("REMOTE_CHANGED_DURING_SCAN");
 			const fetched = (yield* git(
 				"--git-dir",
 				directory,
@@ -72,7 +80,13 @@ export const verifyRemoteObjects = (path: string) =>
 			if (
 				JSON.stringify([...actual].sort()) !== JSON.stringify([...after].sort())
 			)
-				throw new Error("Fetched refs mismatch");
+				throw new Error("REMOTE_CHANGED_DURING_SCAN");
+			heads.set(
+				remotes[index]?.name ?? "",
+				new Set(
+					[...after.keys()].filter((ref) => ref.startsWith("refs/heads/")),
+				),
+			);
 			for (const [ref, id] of after)
 				if (ref.startsWith("refs/tags/")) {
 					const values = tags.get(ref) ?? new Set<string>();
@@ -91,8 +105,12 @@ export const verifyRemoteObjects = (path: string) =>
 		const objects = new Set(output.trim().split("\n").filter(Boolean));
 		if ([...objects].some((id) => !oid.test(id)))
 			throw new Error("Invalid object IDs");
-		return { objects, tags };
+		return { objects, tags, heads };
 	}).pipe(
 		Effect.scoped,
-		Effect.catchDefect(() => Effect.fail(new Error("Verification failed"))),
+		Effect.catchDefect((error) =>
+			Effect.fail(
+				error instanceof Error ? error : new Error("Verification failed"),
+			),
+		),
 	);

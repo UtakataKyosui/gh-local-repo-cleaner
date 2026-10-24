@@ -73,6 +73,8 @@ test("JSON contract excludes snapshots and filters display without hiding UNKNOW
 	const json = JSON.parse(result.stdout);
 	expect(json.schema_version).toBe(1);
 	expect(json.summary).toEqual({
+		safe_size_bytes_estimate: 0,
+		safe_size_unknown_count: 1,
 		scanned: 2,
 		returned: 1,
 		safe: 1,

@@ -65,6 +65,10 @@ export const makeCommandRunner = (environment: NodeJS.ProcessEnv) =>
 						env: {
 							...env,
 							GIT_TERMINAL_PROMPT: "0",
+							GIT_ASKPASS: "/usr/bin/false",
+							SSH_ASKPASS: "/usr/bin/false",
+							GIT_SSH_COMMAND: `${env.GIT_SSH_COMMAND ?? "ssh"} -oBatchMode=yes`,
+							GIT_ALLOW_PROTOCOL: "file:https:http:ssh:git",
 							GIT_OPTIONAL_LOCKS: "0",
 							LC_ALL: "C",
 						},
