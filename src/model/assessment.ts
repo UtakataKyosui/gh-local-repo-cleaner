@@ -15,6 +15,7 @@ export interface Assessment {
 	readonly metadata: {
 		readonly metadata_errors?: readonly string[];
 		readonly size_bytes: number | null;
+		readonly last_commit_status?: "available" | "none" | "unavailable";
 		readonly last_commit_at: string | null;
 		readonly language: string | null;
 	};

@@ -84,7 +84,35 @@ remote は Git の `remote get-url` で `url.*.insteadOf` 展開後の URL を�
 
 ## 除外と出力
 
-テキスト出力は stdout が TTY のとき状態ごとに色付けします（SAFE=緑、DIRTY=黄、PROTECTED=赤、UNKNOWN=マゼンタ）。`NO_COLOR` で無効化、`FORCE_COLOR` で強制できます。`--json` は常に無色です。
+テキスト出力は stdout が TTY のとき状態ごとに色付けします（SAFE=緑、DIRTY=黄、PROTECTED=赤、UNKNOWN=マゼンタ）。`NO_COLOR` で無効化、`FORCE_COLOR` で強制できます。`scan` は先頭に検査総数・表示件数・状態別件数と、SAFE の退避候補数・論理サイズ概算を表示します。
+続いて管理ルートごとの tree を表示し、最後に `inspect` と JSON への案内を出します。
+各リポジトリは状態・読みやすい容量と最大3グループの理由で要約します。
+共通原因（リモート未設定に伴う未検証、作業変更など）は表示上まとめ、残りは理由の種類数で示します。
+パスと名前は引用・エスケープし、長い名前も切り詰めず全件表示します。
+
+例えば `gh local-repo-cleaner scan --lang ja` の出力は次の構造です（架空の2件）。
+
+```text
+検査 2 件; 表示 2 件; SAFE 1; DIRTY 0; PROTECTED 1; UNKNOWN 0
+退避候補: 1件 / 論理サイズ概算: 120 MiB; サイズ不明: 0件
+
+"/path/to/ghq" /
+└── "github.com"/
+    └── "owner"/
+        ├── "project-a" [SAFE] 120 MiB
+        └── "project-b" [PROTECTED] 537 MiB
+            未保全ref 44件 · 作業変更あり · worktreeあり · ほか2種類の理由
+
+詳細: inspect <リポジトリ>
+全データ: scan --json
+```
+
+`list --status safe` は絶対パス・状態・容量・理由要約を1リポジトリ1行で表示します。
+`inspect ./project` は全理由コード・日本語理由名・理由ごとの状態・対象 ref・対処案を表示します。
+ref 数と各 ref の未保全コミット数は区別し、重複しうるコミット数を合算しません。
+要約は表示専用で、詳細と JSON には元の全理由・対象 ref を残します。
+
+`--json` は常に無色です。
 
 stderr が TTY のとき、診断中は進捗ゲージ（`Scanning ████░░░ 3/28`）を stderr に表示し、完了時に消します。stdout と JSON には混ざりません。
 
@@ -153,7 +181,9 @@ cleanは移動直前に設定を再読込し、内容変更・エラー時は停
 SAFEの既知サイズ合計 `safe_size_bytes_estimate` と欠損数 `safe_size_unknown_count` をJSONのsummaryに出します。
 同一ファイルシステム内の退避は空き容量を増やしません。
 `last_commit_at` は全ローカルブランチtipとHEADのcommitter timestampの最大値（UTC RFC3339）です。
-コミットなし・取得不能は `null`。ファイル更新日時や作業の有無は表さず、メタデータのみの取得失敗は安全判定を変更しません。
+コミットなし・取得不能は `null`。追加の `last_commit_status` は `available`（取得成功）、
+`none`（対象コミットなし）、`unavailable`（取得失敗）で区別します。取得失敗のみ
+`metadata_errors` に `LAST_COMMIT_UNAVAILABLE` を記録します。ファイル更新日時や作業の有無は表さず、メタデータのみの取得失敗は安全判定を変更しません。
 
 オンライン検証は隔離した一時bareストアで各remoteの現在のheads/tagsを取得し、取得前後のrefsと照合します。
 独自refs・古いtracking refs・upstream設定だけは保全の証拠にしません。
