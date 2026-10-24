@@ -46,5 +46,13 @@ env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner scan "$sandbox/rep
 grep -q '"status":"SAFE"' "$sandbox/scan.json"
 env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner trash list --state-dir "$sandbox/absent-state"
 test ! -e "$sandbox/absent-state"
+# The compiled binary must load the native lock and no-replace rename, so move and restore for real.
+state="$sandbox/state-smoke"
+env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner clean "$sandbox/repositories" --yes --state-dir "$state"
+test ! -e "$sandbox/repositories/repo"
+env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner trash list --state-dir "$state" | grep -q ' moved '
+id=$(basename "$state"/entries/*)
+env PATH="$sandbox/minimal-bin" "$gh_path" local-repo-cleaner restore "$id" --yes --state-dir "$state"
+test -f "$sandbox/repositories/repo/tracked"
 tar -czf "$output/gh-local-repo-cleaner-$asset_platform.tar.gz" -C "$sandbox/gh-local-repo-cleaner" --exclude=.git .
 (cd "$output" && shasum -a 256 "gh-local-repo-cleaner-$asset_platform" "gh-local-repo-cleaner-$asset_platform.tar.gz" > SHA256SUMS)

@@ -134,23 +134,61 @@ stdout は16 MiBを上限とします。生の stderr や認証 URL をエラー
 
 ## 退避・復元と復旧
 
-退避先は `${XDG_DATA_HOME:-$HOME/.local/share}/gh-local-repo-cleaner` です。
+退避先（state root）は、絶対パスの `XDG_STATE_HOME` があればその下の
+`gh-local-repo-cleaner`、なければ `~/.local/state/gh-local-repo-cleaner` です。
 `clean` / `trash list` / `restore` には絶対パスの `--state-dir` を指定できます。
-専用ディレクトリは0700、鍵と記録は0600です。元リポジトリ全体を rename し、
-クロスデバイス移動・権限エラー時にコピー後削除へ切り替えません。
+元リポジトリと包含関係にある場所は拒否します。
 
-承認後に再診断とパス・内容・実体の snapshot 照合を行い、変化した対象は保持します。
-移動前に pending 記録を永続化し、移動後に moved、復元後に restored を記録します。
-記録には ID、元パス、管理ルート、日時、結果と照合情報を保持し、HMAC で改ざんを検出します。
-復元先の衝突、記録・payload の改変、領域外パスは操作しません。
-store のロックで clean / restore を直列化し、移動と記録の区間はキャンセルから保護します。
+```text
+<state root>/
+  lock                    # 排他ロック用（OS がプロセス終了時に解放）
+  key                     # 記録の HMAC 鍵
+  entries/<32桁16進ID>/
+    record.json           # 記録（0600）
+    repo/                  # 退避した .git とローカル設定を含むリポジトリ全体
+```
 
-強制終了後の `trash list` は `recovery-required` / `invalid-record` / `orphan-payload` を
-表示して終了1にします。自動削除や推測したパスへの復元は行いません。
-他のプロセスが動いていないことを確認し、store 全体（key、記録、ID ディレクトリ）を
-別途保全してください。pending 記録の元パスと ID の実体を照合し、衝突しない場所へ
-手動で保全してから調査します。残った `.lock` は動作中プロセスがないことを確認した場合のみ
-空ディレクトリとして除去します。整合性を確認できるまで clean / restore を再開しないでください。
+root と各 entry は 0700、`key` と `record.json` は 0600 です。所有者違い・symlink・
+広すぎる権限を検出した場合は黙って使わず失敗します。退避先は同じファイルシステム上の
+専用領域なので、退避しても空き容量は増えません。
+
+- 記録: 退避 ID、元パス、管理ルート、日時（UTC）、状態、検査結果、実体識別情報。
+  HMAC で改ざんを検出し、退避先は ID から導出します（記録内のパスは信用しません）。
+- 状態: `prepared` → `moved` → `restoring` → `restored`、移動に失敗した場合は `failed`。
+- 移動: 承認後に全検査・パス同一性・ルート境界を再確認し、変化や不明があれば
+  `STATE_CHANGED` で保持します（`--yes` でも同じ）。記録を同期書き込みしてから、
+  既存先を上書きしない rename（macOS `renamex_np` / Linux `renameat2`）を行います。
+  EXDEV・権限エラー・先の存在では元を保持して失敗し、コピー後削除には切り替えません。
+- 排他: state root 単位の `flock` を取得し、同時の clean / restore は待たずにエラーにします。
+  このロックは editor や Git を止めません。
+- 失敗の扱い: 個別の検査失敗は次のリポジトリへ進みます。state store の破損・記録の
+  永続化失敗・ロック失敗では残りの移動を止めます。移動後の記録更新に失敗した場合は
+  成功と表示せず、ID を報告します。
+
+`trash list` は記録と実体を照合して次の状態を表示し、1件が壊れていても他の履歴を表示します。
+
+| 状態 | 意味 |
+| --- | --- |
+| `moved` / `restored` / `failed` | 記録と実体が一致 |
+| `not_moved` | 記録は `prepared`、元あり・退避先なし（未移動） |
+| `recoverable` | 元なし・退避先あり。移動済みと確認できる（`restore` 可） |
+| `recovery_required` | 両方あり／両方なし／退避先の内容が変化。自動では何も削除・上書きしない |
+| `invalid_record` / `orphan_entry` | 記録の破損・改ざん・権限不正／記録のない entry |
+
+`recoverable` / `recovery_required` / `invalid_record` / `orphan_entry` があると終了値は 1 です。
+
+`restore <id>` は ID 形式、所有者、記録、退避実体、親パスに symlink がないことを検証します。
+復元先に何か（dangling symlink を含む）が存在する場合、または元の親ディレクトリがない場合は
+拒否し、親を再作成しません。復元は確認または `--yes` の後に、上書きしない rename で行います。
+ネットワーク検証は行わないので DIRTY なリポジトリも復元できます。
+`recovery_required` の entry は復元せず、次の手順で調べます。
+
+1. 他の clean / restore が動いていないことを確認する。
+2. state root 全体（`key`、`entries/`）を別の場所へ保全する。
+3. `record.json` の元パスと `entries/<ID>/repo` の実体、元パスの有無を照合する。
+4. 衝突しない場所へ手動で保全してから調査する。整合を確認するまで clean / restore を再開しない。
+
+0.0.0 の開発版が旧形式（`XDG_DATA_HOME` 配下の `<ID>.json`）で作った退避データは移行しません。
 
 SAFE は検査時点の既知条件の成立です。外部プロセスとの書き込み競合を完全には排除できません。
 作業中のリポジトリには実行せず、別プロセスが復元先や store を操作しない状態で使ってください。
