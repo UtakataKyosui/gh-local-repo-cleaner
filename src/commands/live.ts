@@ -12,7 +12,7 @@ import {
 	RepositoryInspectorLive,
 } from "../core/inspection.ts";
 import { effectiveRemotes } from "../core/remotes.ts";
-import { type TrashSession, TrashStore } from "../core/trash.ts";
+import { TrashError, type TrashSession, TrashStore } from "../core/trash.ts";
 import { CommandRunner, CommandRunnerLive } from "../executil/command.ts";
 import type { Assessment, Batch } from "../model/assessment.ts";
 import { type Invocation, UsageError } from "./arguments.ts";
@@ -220,11 +220,26 @@ export const applicationLive = (
 					),
 				);
 
+			const moveNotice =
+				"Moving within one filesystem frees no disk space; the lock does not stop editors or Git, so do not run this on repositories in use.";
+			const moveHints: Record<string, string> = {
+				STATE_CHANGED: ": changed since inspection; kept in place.",
+				MOVE_FAILED: ": move failed; kept in place (no copy fallback).",
+				RECORD_FAILED_AFTER_MOVE:
+					": moved, but the record was not finalized; run trash list, then restore <ID> if needed.",
+			};
+			const restoreHints: Record<string, string> = {
+				UNRESTORABLE:
+					": destination exists, its parent is missing, or the entry needs manual recovery; nothing was changed.",
+				RECORD_FAILED_AFTER_MOVE:
+					": restored, but the record was not finalized; run trash list.",
+			};
 			const statePath = (invocation: Invocation) => {
+				const configured = process.env.XDG_STATE_HOME;
 				const home =
-					process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
-				if (!isAbsolute(home))
-					throw new UsageError("XDG_DATA_HOME must be absolute");
+					configured && isAbsolute(configured)
+						? configured
+						: join(homedir(), ".local", "state");
 				return invocation.stateDir ?? join(home, "gh-local-repo-cleaner");
 			};
 			return {
@@ -236,9 +251,8 @@ export const applicationLive = (
 							const result = yield* Effect.tryPromise(() => store.list());
 							const text =
 								result.entries
-									.map(
-										(entry) =>
-											`${entry.id} ${entry.status} ${JSON.stringify(entry.original ?? "")}`,
+									.map((entry) =>
+										`${entry.id} ${entry.status} ${JSON.stringify(entry.original ?? "")} ${entry.updated_at ?? ""}`.trimEnd(),
 									)
 									.join("\n") || "Trash is empty.";
 							if (result.failed)
@@ -254,9 +268,15 @@ export const applicationLive = (
 							const entry = entries.entries.find(
 								(entry) => entry.id === invocation.target,
 							);
-							if (entry?.status !== "moved" && entry?.status !== "recoverable")
+							if (!entry)
 								return yield* Effect.fail(
-									new ServiceError({ code: "UNKNOWN_OR_UNRESTORABLE_ID" }),
+									new ServiceError({ code: "UNKNOWN_ID" }),
+								);
+							if (entry.status !== "moved" && entry.status !== "recoverable")
+								return yield* Effect.fail(
+									new ServiceError({
+										code: `NOT_RESTORABLE ${entry.id} ${entry.status}: nothing was changed. Follow the manual recovery steps in the README (退避・復元と復旧).`,
+									}),
 								);
 							const accepted = yield* Effect.tryPromise((signal) =>
 								confirm(
@@ -268,13 +288,21 @@ export const applicationLive = (
 							);
 							if (!accepted) return "Skipped.";
 							yield* Effect.uninterruptible(
-								Effect.tryPromise(async () => {
-									const session = await store.open();
-									try {
-										await session.restore(invocation.target ?? "");
-									} finally {
-										await session.close();
-									}
+								Effect.tryPromise({
+									try: async () => {
+										const session = await store.open();
+										try {
+											await session.restore(invocation.target ?? "");
+										} finally {
+											await session.close();
+										}
+									},
+									catch: (error) =>
+										error instanceof TrashError
+											? new ServiceError({
+													code: `${error.code}${error.id ? ` ${error.id}` : ""}${restoreHints[error.code] ?? ""}`,
+												})
+											: error,
 								}),
 							);
 							return `Restored ${invocation.target}.`;
@@ -307,11 +335,22 @@ export const applicationLive = (
 								);
 								continue;
 							}
+							session ??= yield* Effect.tryPromise({
+								try: () => store.open(),
+								catch: (error) =>
+									new ServiceError({
+										code:
+											error instanceof TrashError
+												? error.code
+												: "STORE_UNAVAILABLE",
+									}),
+							});
+							const held = session;
 							const accepted = yield* Effect.tryPromise((signal) =>
 								confirm(
 									invocation,
 									input,
-									`Move ${JSON.stringify(path)} to ${JSON.stringify(store.path)}?`,
+									`Move ${JSON.stringify(path)} to ${JSON.stringify(join(store.path, "entries", "<ID>", "repo"))}? ${moveNotice}`,
 									signal,
 								),
 							);
@@ -320,8 +359,6 @@ export const applicationLive = (
 								continue;
 							}
 							const expected = item.snapshot;
-							session ??= yield* Effect.tryPromise(() => store.open());
-							const held = session;
 							const revalidate = async () => {
 								if (
 									(await exclusions(invocation.config)).fingerprint !==
@@ -348,26 +385,39 @@ export const applicationLive = (
 										configBefore.fingerprint
 								);
 							};
-							const moved = yield* Effect.uninterruptible(
-								Effect.tryPromise(() =>
-									held.moveRepository(
-										path,
-										item.repository.root,
-										expected,
-										revalidate,
-									),
-								),
+							const outcome = yield* Effect.uninterruptible(
+								Effect.tryPromise({
+									try: () =>
+										held.moveRepository(
+											path,
+											item.repository.root,
+											expected,
+											revalidate,
+										),
+									catch: (error) => error,
+								}),
 							).pipe(
-								Effect.map((id) => ({ id })),
-								Effect.catch(() => Effect.succeed({ id: null })),
+								Effect.map((id) => ({ id, error: null as unknown })),
+								Effect.catch((error) =>
+									Effect.succeed({ id: null, error: error as unknown }),
+								),
 							);
-							if (moved.id)
-								messages.push(`Moved ${JSON.stringify(path)}: ${moved.id}`);
-							else {
-								failed = true;
+							if (outcome.id) {
+								messages.push(`Moved ${JSON.stringify(path)}: ${outcome.id}`);
+								continue;
+							}
+							failed = true;
+							const error = outcome.error;
+							const code =
+								error instanceof TrashError ? error.code : "MOVE_FAILED";
+							messages.push(
+								`${code}${error instanceof TrashError && error.id ? ` ${error.id}` : ""} ${JSON.stringify(path)}${moveHints[code] ?? ""}`,
+							);
+							if (code !== "STATE_CHANGED" && code !== "MOVE_FAILED") {
 								messages.push(
-									`MOVE_FAILED_OR_STATE_CHANGED ${JSON.stringify(path)}; inspect trash records before retrying.`,
+									"Stopped: the state store is not reliable, so remaining repositories were not moved. Run trash list.",
 								);
+								break;
 							}
 						}
 						const message = messages.join("\n") || "No repositories.";

@@ -14,6 +14,7 @@ export async function fixture() {
 		HOME: base,
 		XDG_CONFIG_HOME: join(base, "config"),
 		XDG_DATA_HOME: join(base, "data"),
+		XDG_STATE_HOME: join(base, "state-home"),
 		XDG_CACHE_HOME: join(base, "cache"),
 		GIT_CONFIG_GLOBAL: "/dev/null",
 		GIT_CONFIG_SYSTEM: "/dev/null",
