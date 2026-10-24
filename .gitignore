@@ -24,6 +24,7 @@ report.*.*.*.*.json
 .env.local
 
 # caches
+.fallow/
 .eslintcache
 .cache
 *.tsbuildinfo
