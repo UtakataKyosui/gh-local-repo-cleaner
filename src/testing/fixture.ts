@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+	appendFile,
+	mkdir,
+	mkdtemp,
+	realpath,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeCommandRunner } from "../executil/command.ts";
@@ -39,15 +46,19 @@ export async function fixture() {
 		const path = join(root, name);
 		const remote = join(base, `${name}-remote`);
 		await mkdir(path);
-		await git(path, "init", "-b", "main");
-		await git(path, "config", "user.name", "Integration Test");
-		await git(path, "config", "user.email", "test@example.invalid");
-		await git(path, "config", "commit.gpgsign", "false");
-		await writeFile(join(path, "tracked"), "preserved\n");
+		await Promise.all([
+			git(path, "init", "-b", "main"),
+			git(base, "init", "--bare", remote),
+		]);
+		await Promise.all([
+			appendFile(
+				join(path, ".git", "config"),
+				`[user]\n\tname = Integration Test\n\temail = test@example.invalid\n[commit]\n\tgpgsign = false\n[remote "origin"]\n\turl = ${remote}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`,
+			),
+			writeFile(join(path, "tracked"), "preserved\n"),
+		]);
 		await git(path, "add", ".");
 		await git(path, "commit", "-m", "initial");
-		await git(path, "init", "--bare", remote);
-		await git(path, "remote", "add", "origin", remote);
 		await git(path, "push", "-u", "origin", "main");
 		return { path, remote };
 	}
