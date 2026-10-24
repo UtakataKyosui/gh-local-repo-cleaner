@@ -5,17 +5,17 @@
     "": {
       "name": "gh-local-repo-cleaner",
       "dependencies": {
-        "@crustjs/core": "^0.5.6",
+        "@crustjs/core": "0.5.6",
         "@crustjs/effect": "0.2.3",
-        "@crustjs/extensions": "^0.5.6",
-        "effect": "^4.0.6",
+        "@crustjs/extensions": "0.5.6",
+        "effect": "4.0.6",
       },
       "devDependencies": {
         "@biomejs/biome": "2.6.2",
-        "@crustjs/crust": "^0.5.6",
-        "@types/bun": "latest",
+        "@crustjs/crust": "0.5.6",
+        "@types/bun": "1.4.4",
         "fallow": "3.35.0",
-        "typescript": "^7.0.2",
+        "typescript": "7.0.2",
       },
     },
   },

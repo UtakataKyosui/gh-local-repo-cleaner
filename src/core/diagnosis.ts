@@ -1,30 +1,64 @@
 export type Status = "SAFE" | "DIRTY" | "PROTECTED" | "UNKNOWN";
 
 const reasons = {
+	STAGED_CHANGES: ["DIRTY", "Review and commit staged changes manually."],
+	UNSTAGED_CHANGES: ["DIRTY", "Save and commit worktree changes manually."],
+	UNTRACKED_FILES: ["DIRTY", "Track or separately save untracked files."],
+	EXTERNAL_GIT_STORAGE: [
+		"PROTECTED",
+		"Preserve external Git storage manually.",
+	],
+	HIDDEN_INDEX_STATE: [
+		"PROTECTED",
+		"Review assume-unchanged and skip-worktree files.",
+	],
+	OPERATION_IN_PROGRESS: [
+		"PROTECTED",
+		"Complete the in-progress Git operation manually.",
+	],
+	UNSUPPORTED_REFS: [
+		"PROTECTED",
+		"Preserve replacement, graft and unsupported refs.",
+	],
+	UNBORN_HEAD: ["PROTECTED", "Create the initial commit manually."],
+	REFLOG_ONLY_COMMITS: [
+		"PROTECTED",
+		"Preserve reflog history before cleaning.",
+	],
+	UNREACHABLE_OBJECTS: [
+		"PROTECTED",
+		"Preserve unreachable Git objects before cleaning.",
+	],
+	STATE_CHANGED: ["UNKNOWN", "Stop concurrent writers and inspect again."],
+	UNPUSHED_COMMITS: ["DIRTY", "Preserve or push all local commits manually."],
+	REMOTE_DEPENDENCY: [
+		"PROTECTED",
+		"Preserve local remote dependencies outside the clean target set.",
+	],
 	LOCAL_CHANGES: [
 		"DIRTY",
 		"Commit or save staged, unstaged and untracked files.",
 	],
 	IGNORED_FILES: ["PROTECTED", "Save ignored files before cleaning."],
-	STASH: ["PROTECTED", "Save or apply stash entries."],
-	LOCAL_TAGS: ["PROTECTED", "Verify and preserve local tags."],
+	STASH_PRESENT: ["PROTECTED", "Save or apply stash entries."],
+	LOCAL_TAG_ONLY: ["PROTECTED", "Verify and preserve local tags."],
 	DETACHED_HEAD: ["PROTECTED", "Create a branch for the detached HEAD."],
-	EXTRA_WORKTREES: [
+	WORKTREE_PRESENT: [
 		"PROTECTED",
 		"Preserve and detach additional worktrees manually.",
 	],
-	SUBMODULES: ["PROTECTED", "Preserve submodules manually."],
+	SUBMODULE_PRESENT: ["PROTECTED", "Preserve submodules manually."],
 	EXCLUDED: ["PROTECTED", "Review the exclusion configuration."],
 	UNSUPPORTED_LAYOUT: [
 		"PROTECTED",
 		"Preserve this unsupported Git layout manually.",
 	],
-	MISSING_UPSTREAM: [
+	UPSTREAM_MISSING: [
 		"PROTECTED",
 		"Configure and verify upstreams for every local branch.",
 	],
 	NO_REMOTE: ["UNKNOWN", "Configure and verify a remote."],
-	INSPECTION_FAILED: [
+	LOCAL_INSPECTION_FAILED: [
 		"UNKNOWN",
 		"Resolve the inspection failure and scan again.",
 	],
@@ -39,12 +73,14 @@ export interface Finding {
 	readonly code: ReasonCode;
 	readonly status: Status;
 	readonly action: string;
+	readonly message: string;
 }
 
 export const finding = (code: ReasonCode): Finding => ({
 	code,
 	status: reasons[code][0],
 	action: reasons[code][1],
+	message: code.toLowerCase().replaceAll("_", " "),
 });
 
 export interface Diagnosis {

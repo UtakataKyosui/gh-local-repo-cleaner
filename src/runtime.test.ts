@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { Crust } from "@crustjs/core";
 import { handler, layer } from "@crustjs/effect";
 import { Effect, Exit, Layer } from "effect";
-import { CommandError } from "./core/command.ts";
 import { finding } from "./core/diagnosis.ts";
 import { inspectRepository, RepositoryInspector } from "./core/inspection.ts";
+import { CommandError } from "./executil/command.ts";
 
 for (const mode of ["success", "failure", "cancel"] as const) {
 	test(`official adapter releases the core layer on ${mode} with its Exit`, async () => {

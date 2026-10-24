@@ -35,6 +35,8 @@ jobs:
             platform: linux-x64
           - os: macos-14
             platform: darwin-arm64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -42,22 +44,17 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
-      # Run tests once per OS. Building and packaging below must not call check/test again.
+      # Run tests once per OS/architecture. Building and packaging must not call check/test again.
       - run: bun test
       - name: Build the host binary
         run: bun run build --target host
-      - name: Smoke-test the standalone binary
-        run: ./.crust/${{ matrix.platform }}/bin/gh-local-repo-cleaner-bun-${{ matrix.platform }} --help
-      - name: Archive the binary and adjacent assets
-        run: |
-          tar -czf gh-local-repo-cleaner-${{ matrix.platform }}.tar.gz -C .crust/${{ matrix.platform }}/bin .
-          shasum -a 256 gh-local-repo-cleaner-${{ matrix.platform }}.tar.gz > gh-local-repo-cleaner-${{ matrix.platform }}.tar.gz.sha256
+      - name: Verify isolated GitHub CLI installation without Bun on PATH and package
+        run: bash scripts/verify-distribution.sh '${{ matrix.platform }}'
       - uses: actions/upload-artifact@v4
         with:
           name: gh-local-repo-cleaner-${{ matrix.platform }}
           path: |
-            gh-local-repo-cleaner-${{ matrix.platform }}.tar.gz
-            gh-local-repo-cleaner-${{ matrix.platform }}.tar.gz.sha256
+            .crust/distribution/*
             .crust/manifest.json
           include-hidden-files: true
           if-no-files-found: error
