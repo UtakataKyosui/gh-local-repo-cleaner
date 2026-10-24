@@ -16,6 +16,7 @@ import { Application, ApplicationUnavailable } from "./services.ts";
 interface IO {
 	readonly stdout: (text: string) => void;
 	readonly stderr: (text: string) => void;
+	readonly color?: boolean;
 }
 
 const failureMessages: Record<string, string> = {
@@ -86,7 +87,7 @@ export async function runCli(
 					}),
 				),
 			);
-			const output = present(batch, invocation);
+			const output = present(batch, invocation, io.color);
 			io.stdout(output.stdout);
 			if (output.stderr) io.stderr(output.stderr);
 			code = code || output.exitCode;

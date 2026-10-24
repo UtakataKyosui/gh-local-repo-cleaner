@@ -1,7 +1,20 @@
 import type { Batch } from "../model/assessment.ts";
 import type { Invocation } from "./arguments.ts";
 
-export function present(batch: Batch, invocation: Invocation) {
+const palette = {
+	SAFE: "32",
+	DIRTY: "33",
+	PROTECTED: "31",
+	UNKNOWN: "35",
+	dim: "2",
+	bold: "1",
+} as const;
+
+export function present(batch: Batch, invocation: Invocation, color = false) {
+	const paint = (code: string, text: string) =>
+		color ? `\x1b[${code}m${text}\x1b[0m` : text;
+	const paintStatus = (status: keyof typeof palette) =>
+		paint(`${palette.bold};${palette[status]}`, status);
 	const all = [...batch.assessments].sort((a, b) =>
 		a.repository.path < b.repository.path
 			? -1
@@ -51,21 +64,30 @@ export function present(batch: Batch, invocation: Invocation) {
 			})
 		: [
 				...repositories.flatMap((repo) => [
-					`${repo.status} ${JSON.stringify(repo.path)}`,
+					`${paintStatus(repo.status)} ${JSON.stringify(repo.path)}`,
 					...(invocation.operation === "inspect"
 						? [
 								`  Source: ${repo.source}; root: ${JSON.stringify(repo.root)}; name: ${JSON.stringify(repo.name)}`,
 								`  Checked at: ${repo.checked_at}`,
 							]
 						: []),
-					`  Logical bytes (estimate): ${repo.metadata.size_bytes ?? "unknown"}; last commit: ${repo.metadata.last_commit_at ?? "unknown"}`,
-					...(repo.metadata.metadata_errors ?? []).map((error) => `  ${error}`),
+					paint(
+						palette.dim,
+						`  Logical bytes (estimate): ${repo.metadata.size_bytes ?? "unknown"}; last commit: ${repo.metadata.last_commit_at ?? "unknown"}`,
+					),
+					...(repo.metadata.metadata_errors ?? []).map((error) =>
+						paint(palette.UNKNOWN, `  ${error}`),
+					),
 					...repo.reasons.map(
-						(reason) => `  ${reason.code}: ${reason.message}; ${reason.action}`,
+						(reason) =>
+							`  ${paint(palette[repo.status], reason.code)}: ${reason.message}; ${reason.action}`,
 					),
 				]),
-				`SAFE logical bytes (estimate): ${summary.safe_size_bytes_estimate}; unknown sizes: ${summary.safe_size_unknown_count}`,
-				`Scanned ${summary.scanned}; returned ${summary.returned}; SAFE ${summary.safe}; DIRTY ${summary.dirty}; PROTECTED ${summary.protected}; UNKNOWN ${summary.unknown}`,
+				paint(
+					palette.dim,
+					`SAFE logical bytes (estimate): ${summary.safe_size_bytes_estimate}; unknown sizes: ${summary.safe_size_unknown_count}`,
+				),
+				`Scanned ${summary.scanned}; returned ${summary.returned}; ${paintStatus("SAFE")} ${summary.safe}; ${paintStatus("DIRTY")} ${summary.dirty}; ${paintStatus("PROTECTED")} ${summary.protected}; ${paintStatus("UNKNOWN")} ${summary.unknown}`,
 			].join("\n");
 	return {
 		stdout,

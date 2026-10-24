@@ -9,6 +9,7 @@ import {
 	UsageError,
 } from "./arguments.ts";
 import { present } from "./output.ts";
+import { gauge } from "./progress.ts";
 import { Application, confirm, ServiceError } from "./services.ts";
 
 test.each([
@@ -334,6 +335,19 @@ test("exit code follows the full diagnosis for every status mix", async () => {
 	}
 });
 
+test("text output is colored only when requested and JSON never is", () => {
+	const batch: Batch = {
+		assessments: [assessment("/test/a", "PROTECTED")],
+		errors: [],
+	};
+	const plain = present(batch, normalizeArguments(["scan"]));
+	const colored = present(batch, normalizeArguments(["scan"]), true);
+	const json = present(batch, normalizeArguments(["scan", "--json"]), true);
+	expect(plain.stdout).not.toContain("\x1b[");
+	expect(colored.stdout).toContain("\x1b[1;31mPROTECTED\x1b[0m");
+	expect(json.stdout).not.toContain("\x1b[");
+});
+
 test("text output separates diagnosed and returned counts and inspect shows its source", () => {
 	const batch: Batch = {
 		assessments: [
@@ -369,4 +383,15 @@ test("cancellation during inspect returns 130", async () => {
 	);
 	setTimeout(() => controller.abort(), 10);
 	expect(await pending).toBe(130);
+});
+
+test("progress gauge draws a bar and clears the line on finish", () => {
+	const writes: string[] = [];
+	const progress = gauge({ write: (text) => writes.push(text) });
+	progress.finish();
+	expect(writes).toEqual([]);
+	progress.update(1, 2);
+	expect(writes[0]).toContain("1/2 (50%)");
+	progress.finish();
+	expect(writes.at(-1)).toBe("\r\x1b[2K");
 });
