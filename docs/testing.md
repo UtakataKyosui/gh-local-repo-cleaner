@@ -47,6 +47,9 @@ ghq は PATH 上の偽 executable で再現する。public remote、ユーザー
 | E2E-09 / 記録失敗・プロセス強制終了 | E2E-09 record failure after rename exposes recovery candidate without losing data; separate process death immediately after rename leaves a recoverable pending record | macOS / Linux |
 | E2E-11 / 表示 filter の集計・終了値 | E2E-11 filtered JSON retains UNKNOWN in summary and exit status | macOS / Linux |
 | E2E-12 / ローカル保全先依存 | E2E-12 local remote inside target set protects dependent repositories | macOS / Linux |
+| E2E-12 / insteadOf・symlink・file URL | rewritten path / symlink / file-url remote protects both dependency endpoints from clean --yes | macOS / Linux |
+| FR-04/05 / 相対 remote | relative local remote is verified from the repository rather than cleaner cwd | macOS / Linux |
+| FR-09 / 依存関係が未確認の保護 | unresolved remote dependency graph prevents moving otherwise SAFE targets | macOS / Linux |
 | FR-01/02 / ghq 複数ルート・欠損・不正出力 | ghq executable supports multiple roots, Japanese paths, duplicates and per-item failures | macOS / Linux |
 | FR-08/12 / 除外・symlink・EXDEV | exclusion configuration, symlink escapes and injected EXDEV never move source | macOS / Linux |
 | NFR-08 / 同時 clean / restore | separate clean processes serialize under the store lock; concurrent restore processes never overwrite an existing destination | macOS / Linux |
@@ -57,7 +60,7 @@ ghq は PATH 上の偽 executable で再現する。public remote、ユーザー
 ## 実行証跡と制限
 
 2026-10-24: Docker の native Linux arm64 / Bun 1.4.4 で、
-現行 **88 tests / 201 assertions** の一括実行に成功した。macOS arm64 は全86件の成功後、
+初回実装（`102546f`）の **88 tests / 201 assertions** の一括実行に成功した。macOS arm64 は全86件の成功後、
 追加・変更したテストと不具合修正箇所を絞って再実行し、現行88件に対応する検証を完了した。
 両OSで型チェックとホストバイナリ生成を検証した。
 macOS で Biome・Fallow・actionlint・bash 構文・git diff の検査に成功した。
@@ -70,6 +73,9 @@ Linux x64 / Linux arm64 / macOS arm64 の全環境でテスト・ビルド・隔
 品質チェックも成功している。検証結果だけの文書更新には `[skip ci]` を付けて同じコードの再検証を避ける。
 テストはOS/archごとに1回だけ実行する。build・package・配布 smoke から bun test は呼ばない。
 すでにCIで成功した同一変更のテストをローカルで重複実行しない。
+
+PR レビュー対応では上記の remote URL 回帰テストを5件追加した。
+追加・影響箇所をローカルで検証し、更新コードの3環境の CI 結果は PR 本文に記録する。
 
 故障注入は TrashStore の move / beforeSave 境界で行い、実際の chmod 失敗に依存しない。
 外部プロセスとの全競合を排除する保証や、未対応 OS / arch の動作確認は含めない。

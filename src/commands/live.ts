@@ -1,6 +1,6 @@
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Effect, Layer } from "effect";
 import { exclusions, sizeBytes } from "../core/configuration.ts";
@@ -11,6 +11,7 @@ import {
 	RepositoryInspector,
 	RepositoryInspectorLive,
 } from "../core/inspection.ts";
+import { effectiveRemotes } from "../core/remotes.ts";
 import { TrashStore } from "../core/trash.ts";
 import { CommandRunner, CommandRunnerLive } from "../executil/command.ts";
 import type { Assessment, Batch } from "../model/assessment.ts";
@@ -100,29 +101,39 @@ export const applicationLive = (
 					for (let index = 0; index < assessments.length; index++) {
 						const item = assessments[index];
 						if (!item) continue;
-						const urls = yield* runner
-							.run({
-								executable: "git",
-								args: [
-									"-C",
-									item.repository.path,
-									"config",
-									"--get-regexp",
-									"^remote\\..*\\.url$",
-								],
-							})
-							.pipe(Effect.catch(() => Effect.succeed("")));
-						for (const line of urls.trimEnd().split("\n")) {
-							const url = line.slice(line.indexOf(" ") + 1);
-							let local: string | undefined;
-							if (url.startsWith("file://")) {
+						const remotes = yield* effectiveRemotes(item.repository.path).pipe(
+							Effect.catch(() => Effect.succeed(null)),
+						);
+						if (remotes === null) {
+							// A missing entry has no repository to depend on another target.
+							// Otherwise an incomplete dependency graph must prevent evacuation.
+							const missing = yield* Effect.tryPromise(async () => {
 								try {
-									local = decodeURIComponent(new URL(url).pathname);
-								} catch {
-									local = undefined;
+									await lstat(item.repository.path);
+									return false;
+								} catch (error) {
+									if ((error as NodeJS.ErrnoException).code === "ENOENT")
+										return true;
+									throw error;
 								}
-							} else if (!/^[a-z][a-z0-9+.-]*:|^[^/]+@[^:]+:/i.test(url) && url)
-								local = resolve(item.repository.path, url);
+							}).pipe(Effect.catch(() => Effect.succeed(false)));
+							if (!missing)
+								for (let other = 0; other < assessments.length; other++) {
+									const candidate = assessments[other];
+									if (!candidate) continue;
+									const result = diagnose(candidate.repository.path, [
+										...candidate.reasons,
+										finding("LOCAL_INSPECTION_FAILED"),
+									]);
+									assessments[other] = {
+										...candidate,
+										status: result.status,
+										reasons: result.reasons,
+									};
+								}
+							continue;
+						}
+						for (const { localPath: local } of remotes) {
 							if (
 								local &&
 								assessments.some(

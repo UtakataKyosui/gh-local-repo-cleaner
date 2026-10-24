@@ -9,7 +9,8 @@ import {
 	symlink,
 	writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import { snapshot } from "../core/snapshot.ts";
 import { TrashStore } from "../core/trash.ts";
 import { makeCommandRunner } from "../executil/command.ts";
@@ -452,4 +453,92 @@ test("global Git configuration changes after approval invalidate the snapshot", 
 	expect(await readFile(join(repo.path, "tracked"), "utf8")).toBe(
 		"preserved\n",
 	);
+});
+
+test.each(["path", "symlink", "file-url"] as const)(
+	"rewritten %s remote protects both dependency endpoints from clean --yes",
+	async (kind) => {
+		const f = await setup();
+		const a = await f.repository("a");
+		const b = await f.repository("b");
+		// Preserve both histories even if the fixtures were committed in different seconds.
+		await f.git(a.path, "push", b.path, "HEAD:refs/heads/backup-a");
+		await f.git(b.path, "push", "--all", "origin");
+		const alias = join(f.base, "remote alias 日本語");
+		await symlink(f.root, alias);
+		const base =
+			kind === "path"
+				? `${f.root}/`
+				: kind === "symlink"
+					? `${alias}/`
+					: pathToFileURL(`${alias}/`).href;
+		const config = join(f.base, "gitconfig");
+		await writeFile(config, `[url "${base}"]\n\tinsteadOf = backup:\n`);
+		f.env.GIT_CONFIG_GLOBAL = config;
+		await f.git(a.path, "remote", "set-url", "origin", "backup:b");
+		const before = await Promise.all([a, b].map((repo) => snapshot(repo.path)));
+		const scan = await f.run("scan", f.root, "--json");
+		expect(scan.code).toBe(0);
+		const json = JSON.parse(scan.stdout);
+		expect(json.repositories).toHaveLength(2);
+		for (const repository of json.repositories) {
+			expect(repository.status).toBe("PROTECTED");
+			expect(
+				repository.reasons.map((reason: { code: string }) => reason.code),
+			).toContain("REMOTE_DEPENDENCY");
+		}
+		expect(
+			(await f.run("clean", f.root, "--yes", "--state-dir", f.store)).code,
+		).toBe(0);
+		expect(
+			await Promise.all([a, b].map((repo) => snapshot(repo.path))),
+		).toEqual(before);
+		expect(await lstat(f.store).catch(() => null)).toBeNull();
+	},
+);
+
+test("relative local remote is verified from the repository rather than cleaner cwd", async () => {
+	const f = await setup();
+	const repo = await f.repository("relative remote 日本語");
+	await f.git(
+		repo.path,
+		"remote",
+		"set-url",
+		"origin",
+		relative(repo.path, repo.remote),
+	);
+	expect(process.cwd()).not.toBe(repo.path);
+	expect(await f.git(repo.path, "ls-remote", "--heads", "origin")).toContain(
+		"refs/heads/main",
+	);
+	const before = await snapshot(repo.path);
+	const result = await f.run("inspect", repo.path, "--json");
+	expect(result.code).toBe(0);
+	expect(JSON.parse(result.stdout).repositories[0].status).toBe("SAFE");
+	expect(await snapshot(repo.path)).toEqual(before);
+	expect(
+		(await f.run("clean", f.root, "--yes", "--state-dir", f.store)).code,
+	).toBe(0);
+	const id = (await new TrashStore(f.store).list()).entries[0]?.id ?? "";
+	expect(
+		(await f.run("restore", id, "--yes", "--state-dir", f.store)).code,
+	).toBe(0);
+	expect(await f.git(repo.path, "ls-remote", "--heads", "origin")).toContain(
+		"refs/heads/main",
+	);
+});
+
+test("unresolved remote dependency graph prevents moving otherwise SAFE targets", async () => {
+	const f = await setup();
+	const a = await f.repository("a"),
+		b = await f.repository("b");
+	await f.git(a.path, "config", "--add", "remote.origin.url", b.path);
+	const before = await Promise.all([a, b].map((repo) => snapshot(repo.path)));
+	expect(
+		(await f.run("clean", f.root, "--yes", "--state-dir", f.store)).code,
+	).toBe(1);
+	expect(await Promise.all([a, b].map((repo) => snapshot(repo.path)))).toEqual(
+		before,
+	);
+	expect(await lstat(f.store).catch(() => null)).toBeNull();
 });

@@ -73,6 +73,10 @@ HEAD・全 refs・reflog と `fsck --unreachable --no-reflogs` のオブジェ�
 外部 gitdir / common dir / alternates、隠れた index フラグ、進行中操作、
 replace refs / grafts / 特殊 refs、unborn HEAD は退避しません。
 診断対象内にローカル remote がある場合、その依存元・保全先の自動退避を保護します。
+remote は Git の `remote get-url` で `url.*.insteadOf` 展開後の URL を取得し、
+相対ローカルパスは検査対象リポジトリを基準に解決します。symlink と file URL も
+実パスで依存関係を照合します。既存リポジトリの remote を解決できず依存関係を
+確認できない場合は、対象群を UNKNOWN として自動退避しません。
 
 ## 除外と出力
 

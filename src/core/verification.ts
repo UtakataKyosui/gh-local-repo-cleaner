@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { CommandRunner } from "../executil/command.ts";
+import { effectiveRemotes } from "./remotes.ts";
 
 const oid = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 function remoteRefs(output: string): Map<string, string> {
@@ -35,19 +36,10 @@ export const verifyRemoteObjects = (path: string) =>
 				Effect.promise(() => rm(directory, { recursive: true, force: true })),
 		);
 		yield* git("init", "--bare", directory);
-		const names = (yield* git("-C", path, "remote"))
-			.trim()
-			.split("\n")
-			.filter(Boolean);
-		if (names.length === 0) throw new Error("No remote");
+		const remotes = yield* effectiveRemotes(path);
+		if (remotes.length === 0) throw new Error("No remote");
 		const tags = new Map<string, Set<string>>();
-		for (const [index, name] of names.entries()) {
-			const urls = (yield* git("-C", path, "remote", "get-url", "--all", name))
-				.trimEnd()
-				.split("\n");
-			if (urls.length !== 1 || !urls[0])
-				throw new Error("Ambiguous remote URL");
-			const url = urls[0];
+		for (const [index, { url }] of remotes.entries()) {
 			const before = remoteRefs(yield* git("ls-remote", "--refs", "--", url));
 			yield* git(
 				"--git-dir",
