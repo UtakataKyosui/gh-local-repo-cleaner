@@ -1,13 +1,12 @@
 import { isAbsolute } from "node:path";
-import { type Locale, locales } from "./messages.ts";
+import type { Locale } from "./messages.ts";
+import {
+	type CommandSpec,
+	commandTable,
+	flagTable,
+	type Operation,
+} from "./spec.ts";
 
-export type Operation =
-	| "scan"
-	| "list"
-	| "inspect"
-	| "clean"
-	| "trash"
-	| "restore";
 export interface Invocation {
 	readonly operation: Operation;
 	readonly target?: string;
@@ -23,14 +22,10 @@ export interface Invocation {
 }
 export class UsageError extends Error {}
 
-const operations = new Set([
-	"scan",
-	"list",
-	"inspect",
-	"clean",
-	"trash",
-	"restore",
-]);
+function isOperation(value: string | undefined): value is Operation {
+	return value !== undefined && Object.hasOwn(commandTable, value);
+}
+
 export function normalizeArguments(argv: readonly string[]): Invocation {
 	const positional: string[] = [];
 	const flags = new Map<string, string | true>();
@@ -43,96 +38,77 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 		}
 		if (!literal && arg.startsWith("-")) {
 			const equals = arg.indexOf("=");
-			const name = equals < 0 ? arg : arg.slice(0, equals);
+			const option = equals < 0 ? arg : arg.slice(0, equals);
 			const inline = equals < 0 ? undefined : arg.slice(equals + 1);
-			if (!name || flags.has(name))
-				throw new UsageError("Duplicate or malformed flag");
-			if (
-				["--json", "--yes", "--dry-run", "--ghq", "--delete"].includes(name)
-			) {
+			const name = option.slice(2);
+			const spec =
+				option.startsWith("--") && Object.hasOwn(flagTable, name)
+					? flagTable[name]
+					: undefined;
+			if (!spec) throw new UsageError("Unknown flag");
+			if (flags.has(name)) throw new UsageError("Duplicate or malformed flag");
+			if (spec.type === "boolean") {
 				if (inline !== undefined)
 					throw new UsageError("Boolean flag does not accept a value");
 				flags.set(name, true);
-			} else if (
-				[
-					"--status",
-					"--config",
-					"--state-dir",
-					"--group-by",
-					"--lang",
-				].includes(name)
-			) {
+			} else {
 				const value = inline ?? argv[++index];
 				if (!value || value.startsWith("--"))
 					throw new UsageError("Flag requires a value");
 				flags.set(name, value);
-			} else throw new UsageError("Unknown flag");
+			}
 		} else positional.push(arg);
 	}
 	const first = positional[0];
-	const explicit = !!first && operations.has(first);
-	let operation = (explicit ? positional.shift() : "scan") as Operation;
-	if (!explicit && flags.has("--delete")) operation = "clean";
-	else if (flags.has("--delete"))
-		throw new UsageError("--delete requires a directory shorthand");
-	if (operation === "trash" && positional.shift() !== "list")
-		throw new UsageError("Usage: trash list");
-	if (positional.length > 1 || (operation === "trash" && positional.length))
+	const explicit = isOperation(first);
+	const shorthand = Object.entries(commandTable).find(
+		([, command]) => command.shorthand && flags.has(command.shorthand),
+	);
+	let operation: Operation = explicit
+		? (positional.shift() as Operation)
+		: "scan";
+	if (shorthand) {
+		if (explicit)
+			throw new UsageError(
+				`--${shorthand[1].shorthand} requires a directory shorthand`,
+			);
+		operation = shorthand[0] as Operation;
+	}
+	const spec = commandTable[operation] as CommandSpec;
+	if (spec.subcommand && positional.shift() !== spec.subcommand.name)
+		throw new UsageError(`Usage: ${operation} ${spec.subcommand.name}`);
+	if (positional.length > (spec.target ? 1 : 0))
 		throw new UsageError("Too many arguments");
 	const target = positional[0];
-	if (["inspect", "restore"].includes(operation) && !target)
-		throw new UsageError("Target required");
-	if (operation === "restore" && !/^[0-9a-f]{32}$/.test(target ?? ""))
-		throw new UsageError("ID must be 32 lowercase hexadecimal characters");
-	if (flags.has("--delete") && !target)
-		throw new UsageError("Directory required");
-	const allowed: Record<Operation, readonly string[]> = {
-		scan: ["--json", "--ghq", "--config", "--group-by", "--lang"],
-		list: ["--json", "--ghq", "--config", "--status", "--group-by", "--lang"],
-		inspect: ["--json", "--config", "--lang"],
-		clean: [
-			"--lang",
-			"--yes",
-			"--dry-run",
-			"--ghq",
-			"--config",
-			"--state-dir",
-			"--delete",
-		],
-		trash: ["--state-dir", "--lang"],
-		restore: ["--yes", "--state-dir", "--lang"],
-	};
+	if (spec.target?.required && !target) throw new UsageError("Target required");
+	if (spec.target?.pattern && !spec.target.pattern.regex.test(target ?? ""))
+		throw new UsageError(spec.target.pattern.message);
+	if (shorthand && !target) throw new UsageError("Directory required");
 	for (const flag of flags.keys())
-		if (!allowed[operation].includes(flag))
+		if (!Object.hasOwn(spec.flags, flag))
 			throw new UsageError("Flag is not supported for this command");
-	if (flags.has("--ghq") && target)
-		throw new UsageError("Directory and --ghq cannot be combined");
-	const status = flags.get("--status");
-	if (
-		status &&
-		!["safe", "dirty", "protected", "unknown"].includes(String(status))
-	)
-		throw new UsageError("Invalid status");
-	const groupBy = flags.get("--group-by");
-	if (groupBy && groupBy !== "language")
-		throw new UsageError("Invalid --group-by value");
-	const lang = flags.get("--lang") ?? "en";
-	if (!locales.includes(lang as Locale))
-		throw new UsageError("Invalid --lang value");
-	const stateDir = flags.get("--state-dir");
-	if (typeof stateDir === "string" && !isAbsolute(stateDir))
-		throw new UsageError("--state-dir requires an absolute path");
+	for (const [name, flag] of Object.entries(flagTable))
+		if (flag.excludesTarget && flags.has(name) && target)
+			throw new UsageError(`Directory and --${name} cannot be combined`);
+	for (const [name, flag] of Object.entries(flagTable)) {
+		const value = flags.get(name);
+		if (typeof value !== "string") continue;
+		if (flag.values && !flag.values.includes(value))
+			throw new UsageError(flag.invalid ?? `Invalid --${name} value`);
+		if (flag.absolutePath && !isAbsolute(value))
+			throw new UsageError(`--${name} requires an absolute path`);
+	}
 	return {
 		operation,
 		target,
-		json: flags.has("--json"),
-		yes: flags.has("--yes"),
-		dryRun: flags.has("--dry-run"),
-		ghq: flags.has("--ghq"),
-		status: status as Invocation["status"],
-		groupBy: groupBy as Invocation["groupBy"],
-		lang: lang as Locale,
-		config: flags.get("--config") as string | undefined,
-		stateDir: stateDir as string | undefined,
+		json: flags.has("json"),
+		yes: flags.has("yes"),
+		dryRun: flags.has("dry-run"),
+		ghq: flags.has("ghq"),
+		status: flags.get("status") as Invocation["status"],
+		groupBy: flags.get("group-by") as Invocation["groupBy"],
+		lang: (flags.get("lang") ?? "en") as Locale,
+		config: flags.get("config") as string | undefined,
+		stateDir: flags.get("state-dir") as string | undefined,
 	};
 }
