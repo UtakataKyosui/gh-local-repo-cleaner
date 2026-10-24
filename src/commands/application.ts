@@ -1,5 +1,5 @@
 import { lstat } from "node:fs/promises";
-import { Crust } from "@crustjs/core";
+import { Crust, defineCommand } from "@crustjs/core";
 import { handler, layer } from "@crustjs/effect";
 import { help, version } from "@crustjs/extensions";
 import type { Layer } from "effect";
@@ -118,65 +118,190 @@ export async function runCli(
 		description: "Inspect and preserve local Git repositories",
 		version: pkg.version,
 	})
-		.provide(appContext())
-		.command("scan", (command) =>
-			command
-				.args({ name: "directory", type: "string" })
-				.flags(
-					{ name: "json", type: "boolean" },
-					{ name: "ghq", type: "boolean" },
-					{ name: "config", type: "string" },
-				)
-				.action(handler(() => program)),
-		)
-		.command("list", (command) =>
-			command
-				.args({ name: "directory", type: "string" })
-				.flags(
-					{ name: "json", type: "boolean" },
-					{ name: "ghq", type: "boolean" },
-					{ name: "config", type: "string" },
-					{ name: "status", type: "string" },
-				)
-				.action(handler(() => program)),
-		)
-		.command("inspect", (command) =>
-			command
-				.args({ name: "target", type: "string" })
-				.flags(
-					{ name: "json", type: "boolean" },
-					{ name: "config", type: "string" },
-				)
-				.action(handler(() => program)),
-		)
-		.command("clean", (command) =>
-			command
-				.args({ name: "directory", type: "string" })
-				.flags(
-					{ name: "yes", type: "boolean" },
-					{ name: "dry-run", type: "boolean" },
-					{ name: "ghq", type: "boolean" },
-					{ name: "config", type: "string" },
-					{ name: "state-dir", type: "string" },
-				)
-				.action(handler(() => program)),
-		)
-		.command("trash", (command) =>
-			command.command("list", (child) =>
-				child
-					.flags({ name: "state-dir", type: "string" })
-					.action(handler(() => program)),
+		.add(
+			defineCommand(
+				"scan",
+				{ description: "Diagnose repositories (read-only)" },
+				(command) =>
+					command
+						.provide(appContext())
+						.args({
+							name: "directory",
+							type: "string",
+							description:
+								"Directory whose direct children are scanned (default: all ghq repositories)",
+						})
+						.flags(
+							{ name: "json", type: "boolean", description: "Output as JSON" },
+							{
+								name: "ghq",
+								type: "boolean",
+								description: "Scan all repositories listed by ghq",
+							},
+							{
+								name: "config",
+								type: "string",
+								description: "Path to a config file replacing the default",
+							},
+						)
+						.action(handler(() => program)),
 			),
 		)
-		.command("restore", (command) =>
-			command
-				.args({ name: "id", type: "string" })
-				.flags(
-					{ name: "yes", type: "boolean" },
-					{ name: "state-dir", type: "string" },
-				)
-				.action(handler(() => program)),
+		.add(
+			defineCommand(
+				"list",
+				{ description: "List diagnosed repositories (read-only)" },
+				(command) =>
+					command
+						.provide(appContext())
+						.args({
+							name: "directory",
+							type: "string",
+							description:
+								"Directory whose direct children are listed (default: all ghq repositories)",
+						})
+						.flags(
+							{ name: "json", type: "boolean", description: "Output as JSON" },
+							{
+								name: "ghq",
+								type: "boolean",
+								description: "List all repositories listed by ghq",
+							},
+							{
+								name: "config",
+								type: "string",
+								description: "Path to a config file replacing the default",
+							},
+							{
+								name: "status",
+								type: "string",
+								description: "Show only repositories with this status",
+							},
+						)
+						.action(handler(() => program)),
+			),
 		)
+		.add(
+			defineCommand(
+				"inspect",
+				{ description: "Show the diagnosis of one repository (read-only)" },
+				(command) =>
+					command
+						.provide(appContext())
+						.args({
+							name: "target",
+							type: "string",
+							description:
+								"Repository path (absolute, ./ or ../) or ghq name such as github.com/owner/repo",
+						})
+						.flags(
+							{ name: "json", type: "boolean", description: "Output as JSON" },
+							{
+								name: "config",
+								type: "string",
+								description: "Path to a config file replacing the default",
+							},
+						)
+						.action(handler(() => program)),
+			),
+		)
+		.add(
+			defineCommand(
+				"clean",
+				{
+					description:
+						"Move SAFE repositories to the trash so they can be restored",
+				},
+				(command) =>
+					command
+						.provide(appContext())
+						.args({
+							name: "directory",
+							type: "string",
+							description:
+								"Directory whose direct children are cleaned (default: all ghq repositories)",
+						})
+						.flags(
+							{
+								name: "yes",
+								type: "boolean",
+								description: "Move without asking for confirmation",
+							},
+							{
+								name: "dry-run",
+								type: "boolean",
+								description:
+									"Show what would be moved without changing anything",
+							},
+							{
+								name: "ghq",
+								type: "boolean",
+								description: "Clean repositories listed by ghq",
+							},
+							{
+								name: "config",
+								type: "string",
+								description: "Path to a config file replacing the default",
+							},
+							{
+								name: "state-dir",
+								type: "string",
+								description: "Absolute path of the state directory",
+							},
+						)
+						.action(handler(() => program)),
+			),
+		)
+		.add(
+			defineCommand(
+				"trash",
+				{ description: "Inspect repositories moved by clean" },
+				(command) =>
+					command.add(
+						defineCommand(
+							"list",
+							{ description: "List trashed repositories and their states" },
+							(child) =>
+								child
+									.provide(appContext())
+									.flags({
+										name: "state-dir",
+										type: "string",
+										description: "Absolute path of the state directory",
+									})
+									.action(handler(() => program)),
+						),
+					),
+			),
+		)
+		.add(
+			defineCommand(
+				"restore",
+				{ description: "Move a trashed repository back to its original path" },
+				(command) =>
+					command
+						.provide(appContext())
+						.args({
+							name: "id",
+							type: "string",
+							description: "Trash entry ID shown by trash list",
+						})
+						.flags(
+							{
+								name: "yes",
+								type: "boolean",
+								description: "Restore without asking for confirmation",
+							},
+							{
+								name: "state-dir",
+								type: "string",
+								description: "Absolute path of the state directory",
+							},
+						)
+						.action(handler(() => program)),
+			),
+		)
+		.provide(appContext())
 		.action(handler(() => program))
 		.extend(version(), help());
 	const normalized = invocation
