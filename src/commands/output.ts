@@ -1,8 +1,9 @@
 import type { Batch } from "../model/assessment.ts";
 import type { Invocation } from "./arguments.ts";
-import { describeReason, text } from "./messages.ts";
+import { reasonAction, reasonDetail, text } from "./messages.ts";
 
 const otherGroup = "Other";
+const detailLimit = 5;
 const statuses = ["safe", "dirty", "protected", "unknown"] as const;
 
 const palette = {
@@ -133,10 +134,25 @@ export function present(batch: Batch, invocation: Invocation, color = false) {
 					...(repo.metadata.metadata_errors ?? []).map((error) =>
 						paint(palette.UNKNOWN, `  ${error}`),
 					),
-					...repo.reasons.map(
-						(reason) =>
-							`  ${paint(palette[repo.status], reason.code)}: ${describeReason(invocation.lang, reason)}`,
-					),
+					...Map.groupBy(repo.reasons, (reason) => reason.code)
+						.values()
+						.flatMap((group) => {
+							const [first] = group;
+							if (!first) return [];
+							const details = group.flatMap(
+								(reason) => reasonDetail(invocation.lang, reason) ?? [],
+							);
+							return [
+								`  ${paint(palette[repo.status], first.code)}${details.length ? ` (${details.length})` : ""}`,
+								...details
+									.slice(0, detailLimit)
+									.map((detail) => `    - ${detail}`),
+								...(details.length > detailLimit
+									? [labels.more(details.length - detailLimit)]
+									: []),
+								`    → ${reasonAction(invocation.lang, first)}`,
+							];
+						}),
 				]),
 				paint(
 					palette.dim,

@@ -147,6 +147,47 @@ test("JSON contract excludes snapshots and filters display without hiding UNKNOW
 	expect(result.exitCode).toBe(1);
 });
 
+test("text output groups findings by code, lists branches, truncates long lists and prints each action once", () => {
+	const branches = ["a", "b", "c", "d", "e", "f", "g"];
+	const batch: Batch = {
+		assessments: [
+			{
+				...assessment("/test/a", "PROTECTED"),
+				reasons: [
+					...branches.map((branch) => ({
+						...finding("UPSTREAM_MISSING"),
+						branch,
+					})),
+					{
+						...finding("UNPUSHED_COMMITS"),
+						branch: "a",
+						commit_count: 4,
+					},
+				],
+			},
+		],
+		errors: [],
+	};
+	const english = present(batch, normalizeArguments(["scan"])).stdout;
+	expect(english).toContain(
+		"  UPSTREAM_MISSING (7)\n    - a\n    - b\n    - c\n    - d\n    - e\n    - ... and 2 more\n    → Configure and verify upstreams for every local branch.",
+	);
+	expect(english).toContain(
+		"  UNPUSHED_COMMITS (1)\n    - a: 4 unpreserved commits\n    → ",
+	);
+	expect(english.split("Configure and verify upstreams").length).toBe(2);
+	const japanese = present(
+		batch,
+		normalizeArguments(["scan", "--lang", "ja"]),
+	).stdout;
+	expect(japanese).toContain("    - …ほか 2 件");
+	expect(japanese).toContain("    - a: 未保全コミット 4 件");
+	const json = JSON.parse(
+		present(batch, normalizeArguments(["scan", "--json"])).stdout,
+	);
+	expect(json.repositories[0].reasons).toHaveLength(8);
+});
+
 test("--lang ja translates labels and actions while codes, statuses and JSON stay untranslated", () => {
 	const batch: Batch = {
 		assessments: [assessment("/test/a", "UNKNOWN")],
@@ -161,7 +202,9 @@ test("--lang ja translates labels and actions while codes, statuses and JSON sta
 		normalizeArguments(["scan", "--lang", "ja"]),
 	).stdout;
 	expect(japanese).toContain('UNKNOWN "/test/a"');
-	expect(japanese).toContain("LOCAL_INSPECTION_FAILED: 検査の失敗を解消して");
+	expect(japanese).toContain(
+		"  LOCAL_INSPECTION_FAILED\n    → 検査の失敗を解消して",
+	);
 	expect(japanese).toContain("検査 1 件; 表示 1 件; SAFE 0");
 	expect(japanese).not.toContain("Scanned");
 	const json = JSON.parse(

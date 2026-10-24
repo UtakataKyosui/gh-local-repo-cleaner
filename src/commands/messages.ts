@@ -58,6 +58,7 @@ const labels = {
 			`  Logical bytes (estimate): ${size ?? "unknown"}; last commit: ${commit ?? "unknown"}`,
 		safeSize: (bytes: number, unknown: number) =>
 			`SAFE logical bytes (estimate): ${bytes}; unknown sizes: ${unknown}`,
+		more: (count: number) => `    - ... and ${count} more`,
 		totals: (scanned: number, returned: number, counts: readonly string[]) =>
 			`Scanned ${scanned}; returned ${returned}; ${counts.join("; ")}`,
 	},
@@ -69,6 +70,7 @@ const labels = {
 			`  論理サイズ(概算): ${size ?? "不明"} バイト; 最終コミット: ${commit ?? "不明"}`,
 		safeSize: (bytes: number, unknown: number) =>
 			`SAFE の論理サイズ(概算): ${bytes} バイト; サイズ不明: ${unknown} 件`,
+		more: (count: number) => `    - …ほか ${count} 件`,
 		totals: (scanned: number, returned: number, counts: readonly string[]) =>
 			`検査 ${scanned} 件; 表示 ${returned} 件; ${counts.join("; ")}`,
 	},
@@ -102,14 +104,16 @@ export const failureMessage = (locale: Locale, code: string) =>
 	(failures[locale] as Record<string, string>)[code] ??
 	failures[locale].DIAGNOSIS_FAILED;
 
-// Text after the reason code; ja replaces the code-derived English message.
-export function describeReason(locale: Locale, reason: Finding) {
-	if (locale === "en") return `${reason.message}; ${reason.action}`;
-	const branch =
-		reason.branch !== undefined && reason.commit_count !== undefined
-			? `${reason.branch}: 未保全コミット ${reason.commit_count} 件; `
-			: "";
-	return `${branch}${actionsJa[reason.code]}`;
+export const reasonAction = (locale: Locale, reason: Finding) =>
+	locale === "en" ? reason.action : actionsJa[reason.code];
+
+// The per-finding line under a reason code; findings without a branch have none.
+export function reasonDetail(locale: Locale, reason: Finding) {
+	if (reason.branch === undefined) return undefined;
+	if (reason.commit_count === undefined) return reason.branch;
+	return locale === "en"
+		? `${reason.branch}: ${reason.commit_count} unpreserved commits`
+		: `${reason.branch}: 未保全コミット ${reason.commit_count} 件`;
 }
 
 // Usage errors are thrown as English text from several layers, so ja is matched on that text.
