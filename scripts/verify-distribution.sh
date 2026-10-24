@@ -16,7 +16,7 @@ cp "$source_bin/gh-local-repo-cleaner-bun-$platform" "$output/gh-local-repo-clea
 sandbox=$(mktemp -d)
 sandbox=$(cd "$sandbox" && pwd -P)
 trap 'rm -rf "$sandbox"' EXIT
-export HOME="$sandbox/home" XDG_CONFIG_HOME="$sandbox/config" XDG_DATA_HOME="$sandbox/data" XDG_CACHE_HOME="$sandbox/cache" GH_CONFIG_DIR="$sandbox/gh-config"
+export HOME="$sandbox/home" XDG_CONFIG_HOME="$sandbox/config" XDG_DATA_HOME="$sandbox/data" XDG_STATE_HOME="$sandbox/state" XDG_CACHE_HOME="$sandbox/cache" GH_CONFIG_DIR="$sandbox/gh-config"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG_COUNT GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
 # Only local installation is used. The placeholder bypasses gh's login gate;

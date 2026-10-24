@@ -766,3 +766,103 @@ test("stale remote-tracking history without reflogs is diagnosed and never evacu
 			.status,
 	).toBe("SAFE");
 });
+
+test("default state root follows an absolute XDG_STATE_HOME and ignores a relative one", async () => {
+	const f = await setup();
+	const first = await f.repository("xdg-state");
+	const spawn = (env: Record<string, string | undefined>) =>
+		Bun.spawn([process.execPath, "src/cli.ts", "clean", f.root, "--yes"], {
+			env,
+			stdout: "ignore",
+			stderr: "ignore",
+		}).exited;
+	expect(await spawn(f.env)).toBe(0);
+	expect(await lstat(first.path).catch(() => null)).toBeNull();
+	expect(
+		(
+			await readdir(
+				join(f.base, "state-home", "gh-local-repo-cleaner", "entries"),
+			)
+		).length,
+	).toBe(1);
+	const second = await f.repository("xdg-relative");
+	expect(await spawn({ ...f.env, XDG_STATE_HOME: "relative" })).toBe(0);
+	expect(await lstat(second.path).catch(() => null)).toBeNull();
+	expect(
+		(
+			await readdir(
+				join(f.base, ".local", "state", "gh-local-repo-cleaner", "entries"),
+			)
+		).length,
+	).toBe(1);
+});
+
+test("an unsafe state directory or a held lock stops clean before any move", async () => {
+	const f = await setup();
+	const repo = await f.repository("store-failure");
+	const before = await snapshot(repo.path);
+	await mkdir(f.store, { mode: 0o755 });
+	await chmod(f.store, 0o755);
+	const unsafe = await f.run("clean", f.root, "--yes", "--state-dir", f.store);
+	expect(unsafe.code).toBe(1);
+	expect(`${unsafe.stdout}${unsafe.stderr}`).toContain("STORE_UNSAFE");
+	await chmod(f.store, 0o700);
+	const held = await new TrashStore(f.store).open();
+	const locked = await f.run("clean", f.root, "--yes", "--state-dir", f.store);
+	await held.close();
+	expect(locked.code).toBe(1);
+	expect(`${locked.stdout}${locked.stderr}`).toContain("LOCK_HELD");
+	expect(await snapshot(repo.path)).toEqual(before);
+});
+
+test("restore of an entry that needs manual recovery names its state and changes nothing", async () => {
+	const f = await setup();
+	await f.repository("needs-recovery");
+	expect(
+		(await f.run("clean", f.root, "--yes", "--state-dir", f.store)).code,
+	).toBe(0);
+	const id = (await new TrashStore(f.store).list()).entries[0]?.id ?? "";
+	await writeFile(join(f.store, "entries", id, "repo", "intruder"), "x");
+	const result = await f.run("restore", id, "--yes", "--state-dir", f.store);
+	expect(result.code).toBe(1);
+	expect(`${result.stdout}${result.stderr}`).toContain(
+		`NOT_RESTORABLE ${id} recovery_required`,
+	);
+	expect(
+		await lstat(join(f.root, "needs-recovery")).catch(() => null),
+	).toBeNull();
+	const missing = await f.run(
+		"restore",
+		"0".repeat(32),
+		"--yes",
+		"--state-dir",
+		f.store,
+	);
+	expect(`${missing.stdout}${missing.stderr}`).toContain("UNKNOWN_ID");
+});
+
+test("clean run from inside a SAFE repository keeps that repository", async () => {
+	const f = await setup();
+	const repo = await f.repository("in-use");
+	const other = await f.repository("idle");
+	const child = Bun.spawn(
+		[
+			process.execPath,
+			join(process.cwd(), "src/cli.ts"),
+			"clean",
+			f.root,
+			"--yes",
+			"--state-dir",
+			f.store,
+		],
+		{
+			cwd: join(repo.path, ".git"),
+			env: f.env,
+			stdout: "pipe",
+			stderr: "pipe",
+		},
+	);
+	await child.exited;
+	expect(await lstat(join(repo.path, "tracked"))).toBeDefined();
+	expect(await lstat(other.path).catch(() => null)).toBeNull();
+});
