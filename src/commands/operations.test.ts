@@ -177,6 +177,50 @@ test("clean --dry-run lists candidates and limits without a prompt, store or loc
 	expect(await lstat(f.store).catch(() => null)).toBeNull();
 });
 
+test("clean --lang ja localizes the report and prompt while keeping paths, codes and statuses", async () => {
+	const prompts: string[] = [];
+	const f = await setup({
+		tty: true,
+		read: async (prompt) => {
+			prompts.push(prompt);
+			return "n";
+		},
+	});
+	const safe = await f.repository("a-safe");
+	const dirty = await f.repository("b-dirty");
+	await writeFile(join(dirty.path, "tracked"), "changed");
+	const dry = await f.run(
+		"clean",
+		f.root,
+		"--dry-run",
+		"--lang",
+		"ja",
+		"--state-dir",
+		f.store,
+	);
+	expect(dry.code).toBe(0);
+	expect(dry.stdout).toContain(`移動予定 ${JSON.stringify(safe.path)}`);
+	expect(dry.stdout).toContain(`残す ${JSON.stringify(dirty.path)}: DIRTY`);
+	expect(dry.stdout).toContain(
+		"ドライラン: 何も移動していません。移動予定 1 件; 残す 1 件。",
+	);
+	expect(dry.stdout).not.toContain("Dry run");
+	const asked = await f.run(
+		"clean",
+		f.root,
+		"--lang",
+		"ja",
+		"--state-dir",
+		f.store,
+	);
+	expect(asked.stdout).toContain("スキップ");
+	expect(asked.stdout).toContain(
+		"移動 0 件; スキップ 1 件; 残す 1 件; 失敗 0 件。",
+	);
+	expect(prompts[0]).toContain(`${JSON.stringify(safe.path)} を`);
+	expect(prompts[0]).toContain("へ移動しますか?");
+});
+
 test("clean confirmation approves only y/yes; refusal, empty input and EOF skip with exit 0", async () => {
 	const answers: (string | null)[] = ["no", "", null, "y"];
 	const prompts: string[] = [];

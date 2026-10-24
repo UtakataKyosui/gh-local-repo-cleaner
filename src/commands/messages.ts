@@ -216,3 +216,97 @@ export function peekLocale(argv: readonly string[]): Locale {
 		(index < 0 ? undefined : options[index + 1]);
 	return locales.find((locale) => locale === value) ?? "en";
 }
+
+interface CleanText {
+	moveNotice: string;
+	moveHint: (code: string) => string;
+	kept: (path: string, status: string, codes: string) => string;
+	wouldMove: (
+		path: string,
+		destination: string,
+		bytes: number | null,
+	) => string;
+	prompt: (path: string, destination: string) => string;
+	skipped: (path: string) => string;
+	moved: (path: string, id: string, destination: string) => string;
+	stopped: string;
+	stateStore: (path: string) => string;
+	dryRunSummary: (would: number, kept: number) => string;
+	summary: (
+		moved: number,
+		skipped: number,
+		kept: number,
+		failed: number,
+	) => string;
+	review: string;
+	empty: string;
+	incomplete: string;
+}
+
+const cleanTexts = {
+	en: {
+		moveNotice:
+			"Moving within one filesystem frees no disk space; the lock does not stop editors, Git or other external writers, so do not run this on repositories in use.",
+		moveHint: (code) =>
+			({
+				STATE_CHANGED: ": changed since inspection; kept in place.",
+				MOVE_FAILED: ": move failed; kept in place (no copy fallback).",
+				RECORD_FAILED:
+					": the record could not be written; kept in place and nothing was moved.",
+				RECORD_FAILED_AFTER_MOVE:
+					": moved, but the record was not finalized; run trash list, then restore <ID> if needed.",
+			})[code as "STATE_CHANGED"] ?? "",
+		kept: (path, status, codes) => `Kept ${path}: ${status} ${codes}`,
+		wouldMove: (path, destination, bytes) =>
+			`Would move ${path} to ${destination} (logical bytes, estimate: ${bytes ?? "unknown"}).`,
+		prompt: (path, destination) => `Move ${path} to ${destination}?`,
+		skipped: (path) => `Skipped ${path}.`,
+		moved: (path, id, destination) => `Moved ${path}: ${id} -> ${destination}`,
+		stopped:
+			"Stopped: the state store is not reliable, so remaining repositories were not moved. Run trash list.",
+		stateStore: (path) => `State store: ${path}`,
+		dryRunSummary: (would, kept) =>
+			`Dry run: nothing was moved. Would move ${would}; kept ${kept}.`,
+		summary: (moved, skipped, kept, failed) =>
+			`Moved ${moved}; skipped ${skipped}; kept ${kept}; failed ${failed}.`,
+		review:
+			"Review with: trash list. Put a repository back with: restore <ID>.",
+		empty: "No repositories.",
+		incomplete:
+			"CLEAN_INCOMPLETE: some repositories could not be diagnosed or moved; see the output.",
+	},
+	ja: {
+		moveNotice:
+			"同一ファイルシステム内の移動ではディスク容量は空きません。ロックはエディタ・Git・その他の外部書き込みを止めないので、使用中のリポジトリには実行しないでください。",
+		moveHint: (code) =>
+			({
+				STATE_CHANGED: ": 検査後に状態が変わったため、そのまま残しました。",
+				MOVE_FAILED:
+					": 移動に失敗したため、そのまま残しました（コピーへのフォールバックなし）。",
+				RECORD_FAILED:
+					": 記録を書き込めなかったため、そのまま残し、何も移動していません。",
+				RECORD_FAILED_AFTER_MOVE:
+					": 移動しましたが記録を確定できませんでした。trash list を確認し、必要なら restore <ID> を実行してください。",
+			})[code as "STATE_CHANGED"] ?? "",
+		kept: (path, status, codes) => `残す ${path}: ${status} ${codes}`,
+		wouldMove: (path, destination, bytes) =>
+			`移動予定 ${path} -> ${destination} (論理サイズ概算: ${bytes ?? "不明"} バイト)`,
+		prompt: (path, destination) => `${path} を ${destination} へ移動しますか?`,
+		skipped: (path) => `スキップ ${path}`,
+		moved: (path, id, destination) =>
+			`移動済み ${path}: ${id} -> ${destination}`,
+		stopped:
+			"中断: 状態領域が信頼できないため、残りのリポジトリは移動していません。trash list を実行してください。",
+		stateStore: (path) => `状態領域: ${path}`,
+		dryRunSummary: (would, kept) =>
+			`ドライラン: 何も移動していません。移動予定 ${would} 件; 残す ${kept} 件。`,
+		summary: (moved, skipped, kept, failed) =>
+			`移動 ${moved} 件; スキップ ${skipped} 件; 残す ${kept} 件; 失敗 ${failed} 件。`,
+		review: "確認: trash list。元に戻す: restore <ID>。",
+		empty: "対象のリポジトリはありません。",
+		incomplete:
+			"CLEAN_INCOMPLETE: 診断または移動できなかったリポジトリがあります。出力を確認してください。",
+	},
+} as const satisfies Record<Locale, CleanText>;
+
+export const cleanText = (locale: Locale): CleanText => cleanTexts[locale];
