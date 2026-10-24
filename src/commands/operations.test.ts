@@ -934,3 +934,20 @@ test("a restore interrupted by EXDEV can be restored again", async () => {
 		"restored",
 	);
 });
+
+test("--lang ja localizes configuration errors of scan in text output but not in JSON", async () => {
+	const f = await setup();
+	const missing = join(f.base, "missing.json");
+	const text = await f.run("scan", "--config", missing, "--lang", "ja");
+	expect(text.code).toBe(2);
+	expect(text.stderr).toMatch(/[ぁ-んァ-ン]/);
+	const json = await f.run(
+		"scan",
+		"--json",
+		"--config",
+		missing,
+		"--lang",
+		"ja",
+	);
+	expect(json.stdout).toContain("Invalid or unreadable configuration");
+});

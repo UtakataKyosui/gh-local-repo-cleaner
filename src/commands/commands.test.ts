@@ -64,8 +64,6 @@ test.each(
 		["clean", "--group-by", "language"],
 		["scan", "--lang", "fr"],
 		["scan", "--lang"],
-		["clean", "--lang", "ja"],
-		["restore", "0123456789abcdef0123456789abcdef", "--lang", "ja"],
 		["list", "--yes"],
 		["list", "--delete"],
 		["list", "--dry-run"],
@@ -175,6 +173,44 @@ test("--lang ja translates labels and actions while codes, statuses and JSON sta
 		message: "local inspection failed",
 		action: "Resolve the inspection failure and scan again.",
 	});
+});
+
+test.each([
+	[["clean", "--lang", "ja"]],
+	[["restore", "0123456789abcdef0123456789abcdef", "--lang", "ja"]],
+	[["trash", "list", "--lang", "ja"]],
+] as const)("--lang is accepted by %j", (argv) => {
+	expect(normalizeArguments(argv).lang).toBe("ja");
+});
+
+test("--lang ja translates every argument error and falls back to English for --lang itself", async () => {
+	for (const argv of [
+		["--unknown"],
+		["scan", "--yes"],
+		["scan", "a", "b"],
+		["inspect"],
+		["list", "--status", "SAFE"],
+		["clean", "--state-dir", "relative"],
+		["trash", "unknown"],
+		["--json=true"],
+	]) {
+		const english: string[] = [];
+		const japanese: string[] = [];
+		const io = (lines: string[]) => ({
+			stdout: () => {},
+			stderr: (text: string) => lines.push(text),
+		});
+		expect(await runCli(argv, io(english))).toBe(2);
+		expect(await runCli([...argv, "--lang", "ja"], io(japanese))).toBe(2);
+		expect(japanese[0]).not.toBe(english[0]);
+		expect(japanese[0]).toMatch(/[ぁ-んァ-ン]/);
+	}
+	const invalid: string[] = [];
+	await runCli(["scan", "--lang", "fr"], {
+		stdout: () => {},
+		stderr: (text) => invalid.push(text),
+	});
+	expect(invalid).toEqual(["Invalid --lang value"]);
 });
 
 test("--lang ja localizes failure messages but keeps the original error detail", async () => {
