@@ -310,3 +310,171 @@ const cleanTexts = {
 } as const satisfies Record<Locale, CleanText>;
 
 export const cleanText = (locale: Locale): CleanText => cleanTexts[locale];
+
+interface TrashEntryView {
+	id: string;
+	status: string;
+	original?: string;
+	destination?: string;
+	created_at?: string;
+	updated_at?: string;
+	recorded?: string | boolean;
+	original_present?: boolean;
+	destination_present?: boolean;
+}
+
+interface RestoreText {
+	restoreHint: (code: string) => string | undefined;
+	storeUnreadable: (code: string, restoring: boolean) => string;
+	entry: (entry: TrashEntryView, quote: (value: unknown) => string) => string;
+	trashEmpty: string;
+	entryCount: (entries: number, attention: number) => string;
+	unstable: string;
+	recoveryRequired: string;
+	unknownId: (id: string) => string;
+	alreadyRestored: (id: string, original: string, updated: string) => string;
+	notRestorable: (id: string, status: string) => string;
+	prompt: (id: string, destination: string, original: string) => string;
+	skipped: string;
+	restoreFailed: (code: string, id: string) => string;
+	restored: (id: string, destination: string, original: string) => string;
+}
+
+const manualEn =
+	"Nothing was changed. See the README (退避・復元と復旧) for manual recovery.";
+const manualJa =
+	"何も変更していません。手動での復旧は README の「退避・復元と復旧」を参照してください。";
+
+const guidanceEn = (status: string, manual: string, id: string) =>
+	({
+		not_moved: "Not moved: the original is still in place.",
+		recoverable: `Moved but not finalized: restore ${id} can put it back.`,
+		recovery_required: `Ambiguous state: do not restore automatically. ${manual}`,
+		invalid_record: `The record is unreadable or fails verification. ${manual}`,
+		orphan_entry: `The entry has no record. ${manual}`,
+	})[status as "not_moved"];
+
+const guidanceJa = (status: string, manual: string, id: string) =>
+	({
+		not_moved: "未移動: 元のリポジトリはそのまま残っています。",
+		recoverable: `移動済みですが未確定です: restore ${id} で元に戻せます。`,
+		recovery_required: `状態が曖昧です: 自動で restore しないでください。${manual}`,
+		invalid_record: `記録を読めないか、検証に失敗しました。${manual}`,
+		orphan_entry: `このエントリには記録がありません。${manual}`,
+	})[status as "not_moved"];
+
+const restoreTexts = {
+	en: {
+		restoreHint: (code) =>
+			({
+				LOCK_HELD:
+					": another clean or restore is running; nothing was changed. Retry later.",
+				STORE_UNSAFE: `: the state store has unsafe ownership, permissions or symlinks. ${manualEn}`,
+				UNRESTORABLE: `: the destination exists, its parent is missing, or the entry needs manual recovery. ${manualEn}`,
+				RECORD_FAILED:
+					": the record could not be written before the move; nothing was moved. Run trash list.",
+				MOVE_FAILED:
+					": the move failed after the record was updated; the data stays in the trash. Run trash list; the entry can be restored again.",
+				RECORD_FAILED_AFTER_MOVE:
+					": restored, but the record was not finalized. Run trash list.",
+			})[code as "LOCK_HELD"],
+		storeUnreadable: (code, restoring) =>
+			restoring
+				? `${code}: the state store could not be read safely. ${manualEn}`
+				: `${code}: the state store could not be read safely, so the history is unknown. ${manualEn}`,
+		entry: (entry, quote) => {
+			const presence = (value?: boolean) => (value ? "present" : "absent");
+			const guidance = guidanceEn(entry.status, manualEn, entry.id);
+			return [
+				`${entry.id} ${entry.status}`,
+				...(entry.recorded
+					? [
+							`  Original: ${quote(entry.original)}`,
+							`  Destination: ${quote(entry.destination)}`,
+							`  Created: ${entry.created_at}; updated: ${entry.updated_at}`,
+							`  Record: ${entry.recorded}; check: ${entry.status}; original path ${presence(entry.original_present)}; destination ${presence(entry.destination_present)}`,
+						]
+					: [`  Record: unreadable or missing; check: ${entry.status}`]),
+				...(guidance ? [`  ${guidance}`] : []),
+			].join("\n");
+		},
+		trashEmpty: "Trash is empty.",
+		entryCount: (entries, attention) =>
+			`${entries} entries; ${attention} need attention.`,
+		unstable:
+			"The store changed while it was being listed, so the result is not reliable. Run trash list again.",
+		recoveryRequired:
+			"RECOVERY_REQUIRED: some entries are unresolved or unverifiable; see the guidance above.",
+		unknownId: (id) =>
+			`UNKNOWN_ID ${id}: no such entry; run trash list. Nothing was changed.`,
+		alreadyRestored: (id, original, updated) =>
+			`ALREADY_RESTORED ${id}: restored to ${original} (last updated ${updated}); nothing was changed.`,
+		notRestorable: (id, status) =>
+			`NOT_RESTORABLE ${id} ${status}: ${manualEn}`,
+		prompt: (id, destination, original) =>
+			`Restore ${id} from ${destination} to ${original}?`,
+		skipped: "Skipped.",
+		restoreFailed: (code, id) =>
+			`${code} ${id}: restore did not complete; run trash list to see the current state.`,
+		restored: (id, destination, original) =>
+			`Restored ${id} from ${destination} to ${original}.`,
+	},
+	ja: {
+		restoreHint: (code) =>
+			({
+				LOCK_HELD:
+					": 別の clean または restore が実行中です。何も変更していません。後で再試行してください。",
+				STORE_UNSAFE: `: 状態領域の所有者・権限・symlink が安全ではありません。${manualJa}`,
+				UNRESTORABLE: `: 復元先が既に存在するか、親ディレクトリがないか、手動での復旧が必要なエントリです。${manualJa}`,
+				RECORD_FAILED:
+					": 移動前に記録を書き込めなかったため、何も移動していません。trash list を実行してください。",
+				MOVE_FAILED:
+					": 記録の更新後に移動が失敗しました。データはごみ箱に残っています。trash list を実行してください。再度 restore できます。",
+				RECORD_FAILED_AFTER_MOVE:
+					": 復元しましたが記録を確定できませんでした。trash list を実行してください。",
+			})[code as "LOCK_HELD"],
+		storeUnreadable: (code, restoring) =>
+			restoring
+				? `${code}: 状態領域を安全に読み取れませんでした。${manualJa}`
+				: `${code}: 状態領域を安全に読み取れなかったため、履歴は不明です。${manualJa}`,
+		entry: (entry, quote) => {
+			const presence = (value?: boolean) => (value ? "あり" : "なし");
+			const guidance = guidanceJa(entry.status, manualJa, entry.id);
+			return [
+				`${entry.id} ${entry.status}`,
+				...(entry.recorded
+					? [
+							`  元のパス: ${quote(entry.original)}`,
+							`  退避先: ${quote(entry.destination)}`,
+							`  作成: ${entry.created_at}; 更新: ${entry.updated_at}`,
+							`  記録: ${entry.recorded}; 確認: ${entry.status}; 元のパス ${presence(entry.original_present)}; 退避先 ${presence(entry.destination_present)}`,
+						]
+					: [`  記録: 読めないか存在しません; 確認: ${entry.status}`]),
+				...(guidance ? [`  ${guidance}`] : []),
+			].join("\n");
+		},
+		trashEmpty: "ごみ箱は空です。",
+		entryCount: (entries, attention) =>
+			`${entries} 件; 要対応 ${attention} 件。`,
+		unstable:
+			"一覧の取得中に状態領域が変化したため、結果は信頼できません。もう一度 trash list を実行してください。",
+		recoveryRequired:
+			"RECOVERY_REQUIRED: 未解決または検証できないエントリがあります。上の案内を確認してください。",
+		unknownId: (id) =>
+			`UNKNOWN_ID ${id}: 該当するエントリがありません。trash list を実行してください。何も変更していません。`,
+		alreadyRestored: (id, original, updated) =>
+			`ALREADY_RESTORED ${id}: ${original} に復元済みです (最終更新 ${updated})。何も変更していません。`,
+		notRestorable: (id, status) =>
+			`NOT_RESTORABLE ${id} ${status}: ${manualJa}`,
+		prompt: (id, destination, original) =>
+			`${id} を ${destination} から ${original} へ復元しますか?`,
+		skipped: "スキップしました。",
+		restoreFailed: (code, id) =>
+			`${code} ${id}: 復元が完了しませんでした。trash list で現在の状態を確認してください。`,
+		restored: (id, destination, original) =>
+			`${id} を ${destination} から ${original} へ復元しました。`,
+	},
+} as const satisfies Record<Locale, RestoreText>;
+
+export const restoreText = (locale: Locale): RestoreText =>
+	restoreTexts[locale];

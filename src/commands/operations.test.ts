@@ -564,6 +564,74 @@ test("restore of an unknown but well-formed ID exits 1 and creates no store", as
 	expect(await lstat(f.store).catch(() => null)).toBeNull();
 });
 
+test("trash list and restore --lang ja localize messages while IDs, record statuses and codes stay", async () => {
+	const prompts: string[] = [];
+	const f = await setup({
+		tty: true,
+		read: async (prompt) => {
+			prompts.push(prompt);
+			return "no";
+		},
+	});
+	const empty = await f.run(
+		"trash",
+		"list",
+		"--lang",
+		"ja",
+		"--state-dir",
+		f.store,
+	);
+	expect(empty.stdout).toContain("ごみ箱は空です。");
+	const repo = await f.repository("localized");
+	const id = await f.moveRepo(repo.path);
+	const listed = await f.run(
+		"trash",
+		"list",
+		"--lang",
+		"ja",
+		"--state-dir",
+		f.store,
+	);
+	expect(listed.stdout).toContain(`${id} moved`);
+	expect(listed.stdout).toContain("元のパス:");
+	expect(listed.stdout).toContain("1 件; 要対応 0 件。");
+	const refused = await f.run(
+		"restore",
+		id,
+		"--lang",
+		"ja",
+		"--state-dir",
+		f.store,
+	);
+	expect(refused.stdout).toBe("スキップしました。");
+	expect(prompts[0]).toContain(`${id} を`);
+	expect(prompts[0]).toContain("へ復元しますか?");
+	const unknown = await f.run(
+		"restore",
+		"0".repeat(32),
+		"--yes",
+		"--lang",
+		"ja",
+		"--state-dir",
+		f.store,
+	);
+	expect(unknown.code).toBe(1);
+	expect(unknown.stderr).toContain(
+		`UNKNOWN_ID ${"0".repeat(32)}: 該当するエントリがありません`,
+	);
+	const restored = await f.run(
+		"restore",
+		id,
+		"--yes",
+		"--lang",
+		"ja",
+		"--state-dir",
+		f.store,
+	);
+	expect(restored.stdout).toContain(`${id} を`);
+	expect(restored.stdout).toContain("復元しました。");
+});
+
 test("restore confirms with ID, destination and original; only y/yes proceeds; non-TTY needs --yes", async () => {
 	const answers: (string | null)[] = ["no", "", null, "yes"];
 	const prompts: string[] = [];

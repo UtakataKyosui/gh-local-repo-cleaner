@@ -13,16 +13,11 @@ import {
 } from "../core/inspection.ts";
 import { detectLanguage } from "../core/language.ts";
 import { effectiveRemotes } from "../core/remotes.ts";
-import {
-	type Entry,
-	TrashError,
-	type TrashSession,
-	TrashStore,
-} from "../core/trash.ts";
+import { TrashError, type TrashSession, TrashStore } from "../core/trash.ts";
 import { CommandRunner, CommandRunnerLive } from "../executil/command.ts";
 import type { Assessment, Batch } from "../model/assessment.ts";
 import { type Invocation, UsageError } from "./arguments.ts";
-import { cleanText } from "./messages.ts";
+import { cleanText, restoreText } from "./messages.ts";
 import type { Progress } from "./progress.ts";
 import {
 	Application,
@@ -250,43 +245,6 @@ export const applicationLive = (
 					),
 				);
 
-			const manual =
-				"Nothing was changed. See the README (退避・復元と復旧) for manual recovery.";
-			const restoreHints: Record<string, string> = {
-				LOCK_HELD:
-					": another clean or restore is running; nothing was changed. Retry later.",
-				STORE_UNSAFE: `: the state store has unsafe ownership, permissions or symlinks. ${manual}`,
-				UNRESTORABLE: `: the destination exists, its parent is missing, or the entry needs manual recovery. ${manual}`,
-				RECORD_FAILED:
-					": the record could not be written before the move; nothing was moved. Run trash list.",
-				MOVE_FAILED:
-					": the move failed after the record was updated; the data stays in the trash. Run trash list; the entry can be restored again.",
-				RECORD_FAILED_AFTER_MOVE:
-					": restored, but the record was not finalized. Run trash list.",
-			};
-			const entryGuidance: Partial<Record<string, string>> = {
-				not_moved: "Not moved: the original is still in place.",
-				recoverable: "Moved but not finalized: restore <ID> can put it back.",
-				recovery_required: `Ambiguous state: do not restore automatically. ${manual}`,
-				invalid_record: `The record is unreadable or fails verification. ${manual}`,
-				orphan_entry: `The entry has no record. ${manual}`,
-			};
-			const describeEntry = (entry: Entry) => {
-				const presence = (value?: boolean) => (value ? "present" : "absent");
-				const guidance = entryGuidance[entry.status]?.replace("<ID>", entry.id);
-				return [
-					`${entry.id} ${entry.status}`,
-					...(entry.recorded
-						? [
-								`  Original: ${JSON.stringify(entry.original)}`,
-								`  Destination: ${JSON.stringify(entry.destination)}`,
-								`  Created: ${entry.created_at}; updated: ${entry.updated_at}`,
-								`  Record: ${entry.recorded}; check: ${entry.status}; original path ${presence(entry.original_present)}; destination ${presence(entry.destination_present)}`,
-							]
-						: [`  Record: unreadable or missing; check: ${entry.status}`]),
-					...(guidance ? [`  ${guidance}`] : []),
-				].join("\n");
-			};
 			const statePath = (invocation: Invocation) => {
 				const configured = process.env.XDG_STATE_HOME;
 				const home =
@@ -300,6 +258,7 @@ export const applicationLive = (
 				operate: (invocation: Invocation) =>
 					Effect.gen(function* () {
 						const store = createStore(statePath(invocation));
+						const restoreWords = restoreText(invocation.lang);
 						if (invocation.operation === "trash") {
 							const result = yield* Effect.tryPromise({
 								try: () => store.list(),
@@ -310,7 +269,7 @@ export const applicationLive = (
 											: "STORE_UNREADABLE";
 									return new ServiceError({
 										code,
-										detail: `${code}: the state store could not be read safely, so the history is unknown. ${manual}`,
+										detail: restoreWords.storeUnreadable(code, false),
 									});
 								},
 							});
@@ -324,21 +283,18 @@ export const applicationLive = (
 							).length;
 							const text = [
 								...(result.entries.length
-									? result.entries.map(describeEntry)
-									: ["Trash is empty."]),
-								`${result.entries.length} entries; ${attention} need attention.`,
-								...(result.unstable
-									? [
-											"The store changed while it was being listed, so the result is not reliable. Run trash list again.",
-										]
-									: []),
+									? result.entries.map((entry) =>
+											restoreWords.entry(entry, JSON.stringify),
+										)
+									: [restoreWords.trashEmpty]),
+								restoreWords.entryCount(result.entries.length, attention),
+								...(result.unstable ? [restoreWords.unstable] : []),
 							].join("\n");
 							if (result.failed)
 								return yield* Effect.fail(
 									new ServiceError({
 										code: "RECOVERY_REQUIRED",
-										detail:
-											"RECOVERY_REQUIRED: some entries are unresolved or unverifiable; see the guidance above.",
+										detail: restoreWords.recoveryRequired,
 										output: text,
 									}),
 								);
@@ -357,7 +313,10 @@ export const applicationLive = (
 											: "STORE_UNREADABLE";
 									return new ServiceError({
 										code,
-										detail: `${code}${restoreHints[code] ?? `: the state store could not be read safely. ${manual}`}`,
+										detail:
+											restoreWords.restoreHint(code) === undefined
+												? restoreWords.storeUnreadable(code, true)
+												: `${code}${restoreWords.restoreHint(code)}`,
 									});
 								},
 							});
@@ -368,32 +327,40 @@ export const applicationLive = (
 								return yield* Effect.fail(
 									new ServiceError({
 										code: "UNKNOWN_ID",
-										detail: `UNKNOWN_ID ${id}: no such entry; run trash list. Nothing was changed.`,
+										detail: restoreWords.unknownId(id),
 									}),
 								);
 							if (entry.status === "restored")
 								return yield* Effect.fail(
 									new ServiceError({
 										code: "ALREADY_RESTORED",
-										detail: `ALREADY_RESTORED ${id}: restored to ${JSON.stringify(entry.original)} (last updated ${entry.updated_at}); nothing was changed.`,
+										detail: restoreWords.alreadyRestored(
+											id,
+											JSON.stringify(entry.original),
+											String(entry.updated_at),
+										),
 									}),
 								);
 							if (entry.status !== "moved" && entry.status !== "recoverable")
 								return yield* Effect.fail(
 									new ServiceError({
 										code: "NOT_RESTORABLE",
-										detail: `NOT_RESTORABLE ${id} ${entry.status}: ${manual}`,
+										detail: restoreWords.notRestorable(id, entry.status),
 									}),
 								);
 							const accepted = yield* Effect.tryPromise((signal) =>
 								confirm(
 									invocation,
 									input,
-									`Restore ${id} from ${JSON.stringify(entry.destination)} to ${JSON.stringify(entry.original)}?`,
+									restoreWords.prompt(
+										id,
+										JSON.stringify(entry.destination),
+										JSON.stringify(entry.original),
+									),
 									signal,
 								),
 							);
-							if (!accepted) return "Skipped.";
+							if (!accepted) return restoreWords.skipped;
 							yield* Effect.uninterruptible(
 								Effect.tryPromise({
 									try: async () => {
@@ -411,12 +378,19 @@ export const applicationLive = (
 												: "RESTORE_FAILED";
 										return new ServiceError({
 											code,
-											detail: `${code} ${id}${restoreHints[code] ?? ": restore did not complete; run trash list to see the current state."}`,
+											detail:
+												restoreWords.restoreHint(code) === undefined
+													? restoreWords.restoreFailed(code, id)
+													: `${code} ${id}${restoreWords.restoreHint(code)}`,
 										});
 									},
 								}),
 							);
-							return `Restored ${id} from ${JSON.stringify(entry.destination)} to ${JSON.stringify(entry.original)}.`;
+							return restoreWords.restored(
+								id,
+								JSON.stringify(entry.destination),
+								JSON.stringify(entry.original),
+							);
 						}
 						const words = cleanText(invocation.lang);
 						if (!invocation.dryRun && !invocation.yes && !input.tty)
