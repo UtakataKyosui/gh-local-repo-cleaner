@@ -82,6 +82,8 @@ remote は Git の `remote get-url` で `url.*.insteadOf` 展開後の URL を�
 
 ## 除外と出力
 
+テキスト出力は stdout が TTY のとき状態ごとに色付けします（SAFE=緑、DIRTY=黄、PROTECTED=赤、UNKNOWN=マゼンタ）。`NO_COLOR` で無効化、`FORCE_COLOR` で強制できます。`--json` は常に無色です。
+
 `scan` / `list` / `inspect` / `clean` は既定で
 `$XDG_CONFIG_HOME/gh-local-repo-cleaner/config.json` を読みます。
 `XDG_CONFIG_HOME` 未指定時は `~/.config` を使い、`--config PATH` でファイルを置換できます。

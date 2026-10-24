@@ -11,6 +11,9 @@ try {
 		{
 			stdout: (text) => console.log(text),
 			stderr: (text) => console.error(text),
+			color:
+				!process.env.NO_COLOR &&
+				(Boolean(process.env.FORCE_COLOR) || Boolean(process.stdout.isTTY)),
 		},
 		applicationLive(),
 		controller.signal,

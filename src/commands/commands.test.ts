@@ -334,6 +334,19 @@ test("exit code follows the full diagnosis for every status mix", async () => {
 	}
 });
 
+test("text output is colored only when requested and JSON never is", () => {
+	const batch: Batch = {
+		assessments: [assessment("/test/a", "PROTECTED")],
+		errors: [],
+	};
+	const plain = present(batch, normalizeArguments(["scan"]));
+	const colored = present(batch, normalizeArguments(["scan"]), true);
+	const json = present(batch, normalizeArguments(["scan", "--json"]), true);
+	expect(plain.stdout).not.toContain("\x1b[");
+	expect(colored.stdout).toContain("\x1b[1;31mPROTECTED\x1b[0m");
+	expect(json.stdout).not.toContain("\x1b[");
+});
+
 test("text output separates diagnosed and returned counts and inspect shows its source", () => {
 	const batch: Batch = {
 		assessments: [
