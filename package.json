@@ -4,7 +4,10 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "A CLI built with Crust",
+	"description": "Inspect and preserve local Git repositories",
+	"engines": {
+		"bun": "1.4.4"
+	},
 	"crust": {
 		"runtime": "bun",
 		"artifact": "binary"
@@ -13,6 +16,11 @@
 		"gh-local-repo-cleaner": "src/cli.ts"
 	},
 	"scripts": {
+		"check": "bun run check:biome && bun run check:fallow && bun run check:types && bun test",
+		"check:biome": "biome check --error-on-warnings .",
+		"check:fallow": "fallow dead-code --fail-on-issues && fallow architecture --fail-on-issues",
+		"fix": "biome check --write .",
+		"test": "bun test",
 		"dev": "bun run src/cli.ts",
 		"build": "crust build",
 		"release": "crust publish",
@@ -20,12 +28,16 @@
 		"check:types": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@crustjs/core": "^0.5.6",
-		"@crustjs/extensions": "^0.5.6"
+		"@crustjs/core": "0.5.6",
+		"@crustjs/effect": "0.2.3",
+		"@crustjs/extensions": "0.5.6",
+		"effect": "4.0.6"
 	},
 	"devDependencies": {
-		"@crustjs/crust": "^0.5.6",
-		"@types/bun": "latest",
-		"typescript": "^7.0.2"
+		"@biomejs/biome": "2.6.2",
+		"@crustjs/crust": "0.5.6",
+		"@types/bun": "1.4.4",
+		"fallow": "3.35.0",
+		"typescript": "7.0.2"
 	}
 }
