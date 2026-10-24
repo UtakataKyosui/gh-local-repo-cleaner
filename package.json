@@ -1,0 +1,31 @@
+{
+	"$schema": "./node_modules/@crustjs/crust/schema/package.json",
+	"name": "gh-local-repo-cleaner",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "A CLI built with Crust",
+	"crust": {
+		"runtime": "bun",
+		"artifact": "binary"
+	},
+	"bin": {
+		"gh-local-repo-cleaner": "src/cli.ts"
+	},
+	"scripts": {
+		"dev": "bun run src/cli.ts",
+		"build": "crust build",
+		"release": "crust publish",
+		"start": "bun .crust/root/bin/gh-local-repo-cleaner.js",
+		"check:types": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@crustjs/core": "^0.5.6",
+		"@crustjs/extensions": "^0.5.6"
+	},
+	"devDependencies": {
+		"@crustjs/crust": "^0.5.6",
+		"@types/bun": "latest",
+		"typescript": "^7.0.2"
+	}
+}
