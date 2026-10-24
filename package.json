@@ -1,7 +1,7 @@
 {
 	"$schema": "./node_modules/@crustjs/crust/schema/package.json",
 	"name": "gh-local-repo-cleaner",
-	"version": "0.0.0",
+	"version": "0.3.0",
 	"private": true,
 	"type": "module",
 	"description": "Inspect and preserve local Git repositories",
