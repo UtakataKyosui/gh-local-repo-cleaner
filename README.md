@@ -33,6 +33,7 @@ gh local-repo-cleaner scan --ghq
 gh local-repo-cleaner scan ~/projects         # 直下だけ、再帰探索しない
 gh local-repo-cleaner ~/projects              # scan の省略形
 gh local-repo-cleaner list ~/projects --status safe --json
+gh local-repo-cleaner scan --group-by language # 言語ごとに見出しを付けて表示
 gh local-repo-cleaner inspect ./project
 gh local-repo-cleaner inspect github.com/owner/repo
 gh local-repo-cleaner clean ~/projects --dry-run
@@ -116,6 +117,29 @@ cleanは移動直前に設定を再読込し、内容変更・エラー時は停
 理由は code / status / message / action を含みます。内部 snapshot は出力しません。
 パス順・理由 code 順に並べ、診断は stderr に分離します。
 `list --status` の summary と終了値はフィルター前の全件から算出します。
+
+`scan` / `list` の `--group-by language` は、リポジトリを主言語ごとにまとめて表示します
+（言語名の昇順、判定不能の `Other` は末尾）。見出しには表示対象の状態別件数を出します。
+`--status` で絞った場合は絞り込み後の件数です。JSON は `--group-by` の有無にかかわらず
+`metadata.language`（判定不能は `null`）を持ち、指定時は `summary.by_language` を追加します。
+主言語はリポジトリ直下のマーカーファイルの存在だけで決め、内容は読まず、symlink は辿りません。
+複数あるときは次の表で上にあるものを採用します。言語は表示用で、安全判定には影響しません。
+マーカーの確認に失敗したときは `metadata_errors` に `LANGUAGE_UNAVAILABLE` を出し、`language` は `null` です。
+
+| 優先 | マーカー | 言語 |
+|---|---|---|
+| 1 | `tsconfig.json` | TypeScript |
+| 2 | `package.json` | JavaScript |
+| 3 | `Cargo.toml` | Rust |
+| 4 | `go.mod` | Go |
+| 5 | `pyproject.toml` / `requirements.txt` / `setup.py` | Python |
+| 6 | `Gemfile` | Ruby |
+| 7 | `composer.json` | PHP |
+| 8 | `pom.xml` / `build.gradle` | Java |
+| 9 | `build.gradle.kts` | Kotlin |
+| 10 | `Package.swift` | Swift |
+| 11 | `mix.exs` | Elixir |
+| 12 | `CMakeLists.txt` | C/C++ |
 
 容量は `.git` と ignored を含む論理サイズの概算です。symlink は辿らず、
 通常ファイルのみを数え、hardlinkは各パスで加算します。

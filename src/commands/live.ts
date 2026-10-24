@@ -11,6 +11,7 @@ import {
 	RepositoryInspector,
 	RepositoryInspectorLive,
 } from "../core/inspection.ts";
+import { detectLanguage } from "../core/language.ts";
 import { effectiveRemotes } from "../core/remotes.ts";
 import {
 	type Entry,
@@ -97,6 +98,9 @@ export const applicationLive = (
 								const size = yield* Effect.tryPromise((signal) =>
 									sizeBytes(repository.path, signal),
 								).pipe(Effect.catch(() => Effect.succeed(null)));
+								const language = yield* Effect.tryPromise(() =>
+									detectLanguage(repository.path),
+								).pipe(Effect.catch(() => Effect.succeed(undefined)));
 								const date = yield* runner
 									.run({
 										executable: "git",
@@ -134,8 +138,12 @@ export const applicationLive = (
 									metadata: {
 										size_bytes: size,
 										last_commit_at: date,
+										language: language ?? null,
 										metadata_errors: [
 											...(size === null ? ["SIZE_UNAVAILABLE"] : []),
+											...(language === undefined
+												? ["LANGUAGE_UNAVAILABLE"]
+												: []),
 											...(date === null ? ["LAST_COMMIT_UNAVAILABLE"] : []),
 										],
 									},

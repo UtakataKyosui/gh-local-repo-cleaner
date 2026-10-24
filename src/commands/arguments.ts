@@ -15,6 +15,7 @@ export interface Invocation {
 	readonly dryRun: boolean;
 	readonly ghq: boolean;
 	readonly status?: "safe" | "dirty" | "protected" | "unknown";
+	readonly groupBy?: "language";
 	readonly config?: string;
 	readonly stateDir?: string;
 }
@@ -50,7 +51,9 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 				if (inline !== undefined)
 					throw new UsageError("Boolean flag does not accept a value");
 				flags.set(name, true);
-			} else if (["--status", "--config", "--state-dir"].includes(name)) {
+			} else if (
+				["--status", "--config", "--state-dir", "--group-by"].includes(name)
+			) {
 				const value = inline ?? argv[++index];
 				if (!value || value.startsWith("--"))
 					throw new UsageError("Flag requires a value");
@@ -76,8 +79,8 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 	if (flags.has("--delete") && !target)
 		throw new UsageError("Directory required");
 	const allowed: Record<Operation, readonly string[]> = {
-		scan: ["--json", "--ghq", "--config"],
-		list: ["--json", "--ghq", "--config", "--status"],
+		scan: ["--json", "--ghq", "--config", "--group-by"],
+		list: ["--json", "--ghq", "--config", "--status", "--group-by"],
 		inspect: ["--json", "--config"],
 		clean: [
 			"--yes",
@@ -101,6 +104,9 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 		!["safe", "dirty", "protected", "unknown"].includes(String(status))
 	)
 		throw new UsageError("Invalid status");
+	const groupBy = flags.get("--group-by");
+	if (groupBy && groupBy !== "language")
+		throw new UsageError("Invalid --group-by value");
 	const stateDir = flags.get("--state-dir");
 	if (typeof stateDir === "string" && !isAbsolute(stateDir))
 		throw new UsageError("--state-dir requires an absolute path");
@@ -112,6 +118,7 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 		dryRun: flags.has("--dry-run"),
 		ghq: flags.has("--ghq"),
 		status: status as Invocation["status"],
+		groupBy: groupBy as Invocation["groupBy"],
 		config: flags.get("--config") as string | undefined,
 		stateDir: stateDir as string | undefined,
 	};

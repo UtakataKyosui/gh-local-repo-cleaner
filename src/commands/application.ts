@@ -144,6 +144,11 @@ export async function runCli(
 								type: "string",
 								description: "Path to a config file replacing the default",
 							},
+							{
+								name: "group-by",
+								type: "string",
+								description: "Group output by language (marker-file based)",
+							},
 						)
 						.action(handler(() => program)),
 			),
@@ -177,6 +182,11 @@ export async function runCli(
 								name: "status",
 								type: "string",
 								description: "Show only repositories with this status",
+							},
+							{
+								name: "group-by",
+								type: "string",
+								description: "Group output by language (marker-file based)",
 							},
 						)
 						.action(handler(() => program)),

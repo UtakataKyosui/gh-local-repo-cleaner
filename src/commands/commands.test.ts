@@ -58,6 +58,10 @@ test.each(
 		),
 		["scan", "dir", "--ghq"],
 		["list", "dir", "--ghq"],
+		["scan", "--group-by", "owner"],
+		["scan", "--group-by"],
+		["inspect", "x", "--group-by", "language"],
+		["clean", "--group-by", "language"],
 		["list", "--yes"],
 		["list", "--delete"],
 		["list", "--dry-run"],
@@ -101,7 +105,7 @@ function assessment(path: string, status: Assessment["status"]): Assessment {
 		status,
 		reasons: status === "UNKNOWN" ? [finding("LOCAL_INSPECTION_FAILED")] : [],
 		checked_at: "2026-01-01T00:00:00Z",
-		metadata: { size_bytes: null, last_commit_at: null },
+		metadata: { size_bytes: null, last_commit_at: null, language: null },
 		snapshot: { path, device: "1", inode: "1", digest: "secret-internal" },
 	};
 }
@@ -134,11 +138,53 @@ test("JSON contract excludes snapshots and filters display without hiding UNKNOW
 		path: "/test/a",
 		source: "directory",
 		root: "/test",
-		metadata: { size_bytes: null, last_commit_at: null },
+		metadata: { size_bytes: null, last_commit_at: null, language: null },
 	});
 	expect(json.errors).toEqual([]);
 	expect(result.stdout).not.toContain("secret-internal");
 	expect(result.exitCode).toBe(1);
+});
+
+test("--group-by language sorts by language, puts unknown last and adds per-language counts", () => {
+	const withLanguage = (
+		path: string,
+		status: Assessment["status"],
+		language: string | null,
+	): Assessment => {
+		const base = assessment(path, status);
+		return { ...base, metadata: { ...base.metadata, language } };
+	};
+	const batch: Batch = {
+		assessments: [
+			withLanguage("/test/a", "SAFE", null),
+			withLanguage("/test/b", "SAFE", "Rust"),
+			withLanguage("/test/c", "UNKNOWN", "Go"),
+			withLanguage("/test/d", "SAFE", "Rust"),
+		],
+		errors: [],
+	};
+	const text = present(
+		batch,
+		normalizeArguments(["scan", "--group-by", "language"]),
+	).stdout.split("\n");
+	expect(text.filter((line) => line.startsWith("=="))).toEqual([
+		"== Go (SAFE 0; DIRTY 0; PROTECTED 0; UNKNOWN 1) ==",
+		"== Rust (SAFE 2; DIRTY 0; PROTECTED 0; UNKNOWN 0) ==",
+		"== Other (SAFE 1; DIRTY 0; PROTECTED 0; UNKNOWN 0) ==",
+	]);
+	const json = JSON.parse(
+		present(
+			batch,
+			normalizeArguments(["list", "--json", "--group-by", "language"]),
+		).stdout,
+	);
+	expect(json.summary.by_language.Rust).toMatchObject({ total: 2, safe: 2 });
+	expect(json.repositories[0].metadata.language).toBe("Go");
+	const ungrouped = present(batch, normalizeArguments(["scan"])).stdout;
+	expect(ungrouped).not.toContain("==");
+	expect(ungrouped.indexOf("/test/a")).toBeLessThan(
+		ungrouped.indexOf("/test/b"),
+	);
 });
 
 test("Crust dispatches normalized argv via official Effect service and separates output", async () => {
