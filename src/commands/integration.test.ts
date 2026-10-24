@@ -682,3 +682,70 @@ test("metadata date failure leaves a verified repository SAFE and JSON reports n
 	expect(json.summary.safe_size_bytes_estimate).toBeGreaterThan(0);
 	expect(json.summary.safe_size_unknown_count).toBe(0);
 });
+
+test("stale remote-tracking history without reflogs is diagnosed and never evacuated", async () => {
+	const f = await setup();
+	const repo = await f.repository("stale-tracking");
+	await f.git(repo.path, "checkout", "-b", "deleted");
+	await writeFile(
+		join(repo.path, "tracked"),
+		"history preserved only by tracking ref\n",
+	);
+	await f.git(repo.path, "commit", "-am", "deleted remote history");
+	const unique = (await f.git(repo.path, "rev-parse", "HEAD")).trim();
+	await f.git(repo.path, "push", "origin", "deleted");
+	await f.git(repo.path, "checkout", "main");
+	await f.git(repo.path, "branch", "-D", "deleted");
+	await f.git(repo.remote, "update-ref", "-d", "refs/heads/deleted");
+	await f.git(
+		repo.path,
+		"reflog",
+		"expire",
+		"--expire=now",
+		"--expire-unreachable=now",
+		"--all",
+	);
+	expect(
+		(await f.git(repo.path, "rev-parse", "refs/remotes/origin/deleted")).trim(),
+	).toBe(unique);
+	expect(await f.git(repo.path, "reflog", "show", "--all", "--format=%H")).toBe(
+		"",
+	);
+	expect(
+		await f.git(
+			repo.path,
+			"fsck",
+			"--full",
+			"--unreachable",
+			"--no-reflogs",
+			"--no-progress",
+		),
+	).toBe("");
+	const before = await snapshot(repo.path);
+	const result = await f.run("scan", f.root, "--json");
+	const assessment = JSON.parse(result.stdout).repositories[0];
+	expect(assessment.status).toBe("DIRTY");
+	expect(assessment.reasons).toContainEqual(
+		expect.objectContaining({
+			code: "UNPUSHED_COMMITS",
+			branch: "refs/remotes/origin/deleted",
+			commit_count: 1,
+		}),
+	);
+	const clean = await f.run("clean", f.root, "--yes", "--state-dir", f.store);
+	expect(clean.code).toBe(0);
+	expect(clean.stdout).toContain("Kept");
+	expect(await snapshot(repo.path)).toEqual(before);
+	expect(await lstat(f.store).catch(() => null)).toBeNull();
+	// Once a current remote head preserves the same history, stale tracking is no obstacle.
+	await f.git(
+		repo.path,
+		"push",
+		"origin",
+		"refs/remotes/origin/deleted:refs/heads/backup",
+	);
+	expect(
+		JSON.parse((await f.run("scan", f.root, "--json")).stdout).repositories[0]
+			.status,
+	).toBe("SAFE");
+});

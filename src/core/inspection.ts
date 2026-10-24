@@ -435,6 +435,8 @@ export const RepositoryInspectorLive = Layer.effect(
 									"for-each-ref",
 									"--format=%(refname)%09%(upstream:remotename)%09%(upstream:remoteref)",
 									"refs/heads/",
+									// Tracking refs are local history to preserve, never remote evidence.
+									"refs/remotes/",
 								),
 							);
 							for (const row of branches) {

@@ -12,6 +12,7 @@ ghq は PATH 上の偽 executable で再現する。public remote、ユーザー
 - `src/core/configuration.test.ts`: version/キー/ルールの厳密検証、globの文字クラス・エスケープ・スラッシュ境界、既定/明示ファイルの不在、容量のGit/ignored・hardlink・symlink循環・読み取り失敗を検証。権限テストはroot実行時のみskip。
 - `src/commands/integration.test.ts`: 設定変更後の移動停止、ignored内の入れ子リポジトリ保護、全ブランチtipの最大日時、空リポジトリのnull、メタデータ取得失敗時のSAFE維持とJSONエラー表現を検証。
 - `src/commands/commands.test.ts`: SAFE容量概算・欠損件数とフィルター前の集計を検証。
+- `stale remote-tracking history without reflogs is diagnosed and never evacuated`（integration）: remoteブランチとローカルブランチを削除しreflogを失効させても、tracking refだけに残る固有履歴をDIRTYとして検出し、cleanで移動しないことを実Gitで検証。現在のremoteに同じ履歴を保全するとSAFEに戻ることも確認。
 
 ## Issue #4: ローカル保護判定
 
