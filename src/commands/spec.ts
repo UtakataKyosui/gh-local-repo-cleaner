@@ -64,7 +64,8 @@ type FlagName = keyof typeof flagSpecs;
 
 export interface CommandSpec {
 	readonly description: string;
-	readonly run: "diagnose" | "operate";
+	// "interactive" runs the TUI, which needs a terminal on both stdin and stdout.
+	readonly run: "diagnose" | "operate" | "interactive";
 	readonly subcommand?: {
 		readonly name: string;
 		readonly description: string;
@@ -178,6 +179,25 @@ const commands = {
 			yes: { description: "Restore without asking for confirmation" },
 			"state-dir": {},
 			lang: {},
+		},
+	},
+	tui: {
+		description:
+			"Browse, clean and restore repositories in an interactive terminal UI",
+		run: "interactive",
+		target: {
+			name: "directory",
+			description:
+				"Directory whose direct children are shown (default: the last one used, else all ghq repositories)",
+			required: false,
+		},
+		flags: {
+			ghq: { description: "Show all repositories listed by ghq" },
+			config: {},
+			status: { description: "Start with only this status shown" },
+			"group-by": { description: "Start grouped by language" },
+			lang: {},
+			"state-dir": {},
 		},
 	},
 } as const satisfies Record<string, CommandSpec>;

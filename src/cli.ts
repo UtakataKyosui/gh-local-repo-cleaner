@@ -15,6 +15,7 @@ try {
 			color:
 				!process.env.NO_COLOR &&
 				(Boolean(process.env.FORCE_COLOR) || Boolean(process.stdout.isTTY)),
+			interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
 		},
 		applicationLive(
 			undefined,

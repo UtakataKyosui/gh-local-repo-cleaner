@@ -175,6 +175,11 @@ const usageJa: readonly (readonly [
 		() => "非対話で実行するには --yes が必要です。",
 	],
 	[
+		/^tui requires an interactive terminal; use scan, list, inspect, clean, trash list or restore instead$/,
+		() =>
+			"tui には対話端末 (TTY) が必要です。代わりに scan・list・inspect・clean・trash list・restore を使ってください。",
+	],
+	[
 		/^Invalid or unreadable configuration$/,
 		() => "設定が不正、または読み取れません。",
 	],
@@ -482,3 +487,95 @@ const restoreTexts = {
 
 export const restoreText = (locale: Locale): RestoreText =>
 	restoreTexts[locale];
+
+interface TuiText {
+	repositories: string;
+	trash: string;
+	details: string;
+	result: string;
+	confirm: string;
+	filter: (status: string | undefined) => string;
+	grouped: string;
+	selected: (count: number) => string;
+	other: string;
+	noRepositories: string;
+	busy: Record<"scan" | "preview" | "clean" | "trash" | "restore", string>;
+	onlySafe: string;
+	nothingSelected: string;
+	confirmClean: (count: number) => string;
+	confirmRestore: string;
+	cancelled: string;
+	finishing: string;
+	keys: Record<"repositories" | "trash" | "dialog", string>;
+}
+
+const tuiTexts = {
+	en: {
+		repositories: "Repositories",
+		trash: "Trash",
+		details: "Details",
+		result: "Result",
+		confirm: "Confirm",
+		filter: (status) => `filter: ${status ?? "all"}`,
+		grouped: "by language",
+		selected: (count) => `selected: ${count}`,
+		other: "Other",
+		noRepositories: "No repositories.",
+		busy: {
+			scan: "Scanning repositories...",
+			preview: "Checking what clean would move...",
+			clean: "Moving repositories to the trash...",
+			trash: "Reading the trash...",
+			restore: "Restoring...",
+		},
+		onlySafe: "Only SAFE repositories can be selected.",
+		nothingSelected: "Select SAFE repositories with Space first.",
+		confirmClean: (count) =>
+			`Press y to move the ${count} selected repositories; any other key cancels.`,
+		confirmRestore: "Press y to restore; any other key cancels.",
+		cancelled: "Cancelled; nothing was changed.",
+		finishing: "Quitting after the running operation finishes...",
+		keys: {
+			repositories:
+				"↑↓/jk move  Space select  a all SAFE  c clean  f filter  g group  l lang  s rescan  t trash  PgUp/PgDn scroll  q quit",
+			trash:
+				"↑↓/jk move  r restore  s reload  t back  l lang  PgUp/PgDn scroll  q quit",
+			dialog: "y confirm  other keys cancel",
+		},
+	},
+	ja: {
+		repositories: "リポジトリ",
+		trash: "ごみ箱",
+		details: "詳細",
+		result: "結果",
+		confirm: "確認",
+		filter: (status) => `絞り込み: ${status ?? "すべて"}`,
+		grouped: "言語別",
+		selected: (count) => `選択: ${count} 件`,
+		other: "その他",
+		noRepositories: "対象のリポジトリはありません。",
+		busy: {
+			scan: "リポジトリを検査しています...",
+			preview: "clean で移動される対象を確認しています...",
+			clean: "リポジトリをごみ箱へ移動しています...",
+			trash: "ごみ箱を読み込んでいます...",
+			restore: "復元しています...",
+		},
+		onlySafe: "選択できるのは SAFE のリポジトリだけです。",
+		nothingSelected: "先に Space で SAFE のリポジトリを選択してください。",
+		confirmClean: (count) =>
+			`y で選択した ${count} 件を移動します。他のキーで取り消します。`,
+		confirmRestore: "y で復元します。他のキーで取り消します。",
+		cancelled: "取り消しました。何も変更していません。",
+		finishing: "実行中の操作が終わってから終了します...",
+		keys: {
+			repositories:
+				"↑↓/jk 移動  Space 選択  a SAFE を全選択  c clean  f 絞り込み  g グループ  l 言語  s 再検査  t ごみ箱  PgUp/PgDn スクロール  q 終了",
+			trash:
+				"↑↓/jk 移動  r 復元  s 再読込  t 戻る  l 言語  PgUp/PgDn スクロール  q 終了",
+			dialog: "y 実行  他のキー 取り消し",
+		},
+	},
+} as const satisfies Record<Locale, TuiText>;
+
+export const tuiText = (locale: Locale): TuiText => tuiTexts[locale];

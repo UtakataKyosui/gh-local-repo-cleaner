@@ -2,7 +2,7 @@ import { createStyle } from "@crustjs/style";
 import type { Finding } from "../core/diagnosis.ts";
 
 // Status colors live here so the text output and the TUI share one definition.
-const statusColors = {
+export const statusColors = {
 	SAFE: "green",
 	DIRTY: "yellow",
 	PROTECTED: "red",

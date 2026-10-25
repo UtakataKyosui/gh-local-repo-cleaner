@@ -10,7 +10,10 @@
 	},
 	"crust": {
 		"runtime": "bun",
-		"artifact": "binary"
+		"artifact": "binary",
+		"bunPlugins": [
+			"./build/optional-platform-stub.ts"
+		]
 	},
 	"bin": {
 		"gh-local-repo-cleaner": "src/cli.ts"
@@ -31,7 +34,10 @@
 		"@crustjs/core": "0.5.6",
 		"@crustjs/effect": "0.2.3",
 		"@crustjs/extensions": "0.5.6",
+		"@crustjs/store": "0.4.4",
 		"@crustjs/style": "0.3.6",
+		"@crustjs/tui": "0.0.6",
+		"@opentui/core": "0.6.8",
 		"effect": "4.0.6"
 	},
 	"devDependencies": {

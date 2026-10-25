@@ -19,6 +19,10 @@ export class Application extends Context.Service<
 		readonly operate: (
 			invocation: Invocation,
 		) => Effect.Effect<string, ServiceError>;
+		// Runs the TUI and returns what its operations reported, for the scrollback.
+		readonly interact: (
+			invocation: Invocation,
+		) => Effect.Effect<string, ServiceError>;
 	}
 >()("Application") {}
 
@@ -26,6 +30,8 @@ export const ApplicationUnavailable = Layer.succeed(Application, {
 	diagnose: () =>
 		Effect.fail(new ServiceError({ code: "SERVICE_NOT_CONNECTED" })),
 	operate: () =>
+		Effect.fail(new ServiceError({ code: "SERVICE_NOT_CONNECTED" })),
+	interact: () =>
 		Effect.fail(new ServiceError({ code: "SERVICE_NOT_CONNECTED" })),
 });
 
