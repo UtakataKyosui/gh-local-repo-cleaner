@@ -38,6 +38,9 @@ import {
 } from "./services.ts";
 import type { Event, Model, Session, TaskCommand } from "./tui-model.ts";
 
+// How long a finished scan may back a clean preview.
+const recentScanMs = 60_000;
+
 // Resolves once the TUI exits; aborted means Ctrl+C.
 type TuiLauncher = (session: Session) => Promise<{ aborted: boolean }>;
 
@@ -82,7 +85,7 @@ export const applicationLive = (
 			const inspector = yield* RepositoryInspector;
 			// The TUI owns the screen while it runs, so the scan gauge stays silent.
 			let screenOwned = false;
-			const diagnoseBatch = (invocation: Invocation) =>
+			const scanRepositories = (invocation: Invocation) =>
 				Effect.gen(function* () {
 					const gauge = screenOwned ? undefined : progress;
 					const patterns = yield* Effect.tryPromise({
@@ -288,6 +291,37 @@ export const applicationLive = (
 					),
 				);
 
+			// The last completed scan, kept for this process only. Only the clean preview
+			// reads it; every scan that can lead to a move runs fresh.
+			let recent: { key: string; at: number; batch: Batch } | undefined;
+			const scanKey = (invocation: Invocation) =>
+				Effect.tryPromise(async () =>
+					JSON.stringify([
+						invocation.target,
+						invocation.ghq,
+						invocation.config,
+						(await exclusions(invocation.config)).fingerprint,
+					]),
+				).pipe(Effect.catch(() => Effect.succeed(undefined)));
+			const diagnoseBatch = (invocation: Invocation) =>
+				Effect.gen(function* () {
+					const key = yield* scanKey(invocation);
+					const batch = yield* scanRepositories(invocation);
+					recent = key ? { key, at: Date.parse(now()), batch } : undefined;
+					return batch;
+				});
+			const diagnoseRecent = (invocation: Invocation) =>
+				Effect.gen(function* () {
+					const key = yield* scanKey(invocation);
+					if (
+						key &&
+						recent?.key === key &&
+						Date.parse(now()) - recent.at < recentScanMs
+					)
+						return recent.batch;
+					return yield* diagnoseBatch(invocation);
+				});
+
 			const statePath = (invocation: Invocation) => {
 				const configured = process.env.XDG_STATE_HOME;
 				const home =
@@ -434,7 +468,9 @@ export const applicationLive = (
 						try: () => exclusions(invocation.config),
 						catch: (error) => error,
 					});
-					const batch = yield* diagnoseBatch(invocation);
+					const batch = yield* (
+						invocation.dryRun ? diagnoseRecent : diagnoseBatch
+					)(invocation);
 					const messages: string[] = [];
 					const count = {
 						moved: 0,
