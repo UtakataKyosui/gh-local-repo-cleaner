@@ -149,3 +149,7 @@ PR レビュー対応では上記の remote URL 回帰テストを5件追加し�
 故障注入は TrashStore の move / beforeSave 境界で行い、実際の chmod 失敗に依存しない。
 外部プロセスとの全競合を排除する保証や、未対応 OS / arch の動作確認は含めない。
 Release 公開・npm publish・実リポジトリでの運用検証は実施しない。
+
+## scan 結果の一時キャッシュ
+
+- `src/commands/operations.test.ts`: TUI の 1 セッション内で、直前（60 秒未満）の scan を clean プレビューが再利用すること、60 秒経過後は再スキャンすること、実際の clean は直前の scan を信用せず必ず再スキャンすることを検証。キャッシュはプロセス内メモリのみで、CLI は 1 回ごとに破棄される。

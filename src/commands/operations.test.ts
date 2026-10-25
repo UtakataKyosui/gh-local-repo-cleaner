@@ -21,6 +21,7 @@ import { fixture } from "../testing/fixture.ts";
 import { runCli } from "./application.ts";
 import { applicationLive } from "./live.ts";
 import type { Confirmation } from "./services.ts";
+import { type Event, initialModel, type TaskCommand } from "./tui-model.ts";
 
 const fixtures: Awaited<ReturnType<typeof fixture>>[] = [];
 afterEach(async () => {
@@ -1062,4 +1063,110 @@ test("--lang ja localizes configuration errors of scan in text output but not in
 		"ja",
 	);
 	expect(json.stdout).toContain("Invalid or unreadable configuration");
+});
+
+// The cache lives in one TUI session, so the scenarios drive its perform callback.
+async function tuiSetup(clock: { now: string }) {
+	const f = await fixture();
+	fixtures.push(f);
+	let calls = 0;
+	const counted = Layer.effect(
+		CommandRunner,
+		Effect.gen(function* () {
+			const base = yield* CommandRunner;
+			return {
+				run: (request) => {
+					calls++;
+					return base.run(request);
+				},
+			};
+		}),
+	).pipe(Layer.provide(f.runner));
+	const state = join(f.base, "state");
+	const session = async (
+		script: (
+			perform: (command: TaskCommand) => Promise<Event>,
+			calls: () => number,
+		) => Promise<void>,
+	) => {
+		let failure: unknown;
+		let ran = false;
+		const app = applicationLive(
+			nonInteractive,
+			() => clock.now,
+			counted,
+			undefined,
+			undefined,
+			async ({ initial, perform }) => {
+				ran = true;
+				const { model } = initialModel({ ...initial, target: f.root });
+				try {
+					await script(
+						(command) => perform(command, model),
+						() => calls,
+					);
+				} catch (error) {
+					failure = error;
+				}
+				return { aborted: false };
+			},
+		);
+		const stderr: string[] = [];
+		await runCli(
+			["tui", f.root, "--state-dir", state],
+			{
+				stdout: () => {},
+				stderr: (text) => stderr.push(text),
+				interactive: true,
+			},
+			app,
+		);
+		if (failure) throw failure;
+		expect({ ran, stderr }).toEqual({ ran: true, stderr: [] });
+	};
+	return { ...f, session };
+}
+
+const previewOf = async (event: Event) =>
+	event.type === "previewed" ? event.report : "";
+
+test("a clean preview reuses a scan finished a moment ago", async () => {
+	const clock = { now: "2026-01-01T00:00:00Z" };
+	const f = await tuiSetup(clock);
+	const repo = await f.repository("cached");
+	await f.session(async (perform, calls) => {
+		await perform({ type: "scan" });
+		const afterScan = calls();
+		clock.now = "2026-01-01T00:00:30Z";
+		const report = await previewOf(
+			await perform({ type: "preview", paths: [repo.path] }),
+		);
+		expect(report).toContain("cached");
+		expect(calls()).toBe(afterScan);
+	});
+});
+
+test("a clean preview scans again once the last scan is a minute old", async () => {
+	const clock = { now: "2026-01-01T00:00:00Z" };
+	const f = await tuiSetup(clock);
+	const repo = await f.repository("expired");
+	await f.session(async (perform, calls) => {
+		await perform({ type: "scan" });
+		const afterScan = calls();
+		clock.now = "2026-01-01T00:01:00Z";
+		await perform({ type: "preview", paths: [repo.path] });
+		expect(calls()).toBeGreaterThan(afterScan);
+	});
+});
+
+test("an actual clean never trusts the last scan", async () => {
+	const clock = { now: "2026-01-01T00:00:00Z" };
+	const f = await tuiSetup(clock);
+	await f.repository("before");
+	await f.session(async (perform) => {
+		await perform({ type: "scan" });
+		const late = await f.repository("late");
+		await perform({ type: "clean", paths: [late.path] });
+		expect(await lstat(late.path).catch(() => null)).toBeNull();
+	});
 });
