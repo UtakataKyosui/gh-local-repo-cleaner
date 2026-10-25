@@ -513,7 +513,7 @@ test("text output is colored only when requested and JSON never is", () => {
 	const colored = present(batch, normalizeArguments(["scan"]), true);
 	const json = present(batch, normalizeArguments(["scan", "--json"]), true);
 	expect(plain.stdout).not.toContain("\x1b[");
-	expect(colored.stdout).toContain("\x1b[1;31mPROTECTED\x1b[0m");
+	expect(colored.stdout).toContain("\x1b[1m\x1b[31mPROTECTED\x1b[39m\x1b[22m");
 	expect(json.stdout).not.toContain("\x1b[");
 });
 

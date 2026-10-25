@@ -1,26 +1,16 @@
+import type { Finding } from "../core/diagnosis.ts";
 import type { Batch } from "../model/assessment.ts";
 import type { Invocation } from "./arguments.ts";
 import { formatSize, humanOutput } from "./human-output.ts";
 import { text } from "./messages.ts";
+import { createPainter } from "./palette.ts";
 
 const otherGroup = "Other";
 const statuses = ["safe", "dirty", "protected", "unknown"] as const;
 
-const palette = {
-	SAFE: "32",
-	DIRTY: "33",
-	PROTECTED: "31",
-	UNKNOWN: "35",
-	dim: "2",
-	bold: "1",
-} as const;
-
 export function present(batch: Batch, invocation: Invocation, color = false) {
 	const labels = text(invocation.lang);
-	const paint = (code: string, text: string) =>
-		color ? `\x1b[${code}m${text}\x1b[0m` : text;
-	const paintStatus = (status: keyof typeof palette) =>
-		paint(`${palette.bold};${palette[status]}`, status);
+	const paintStatus = createPainter(color);
 	const all = [...batch.assessments].sort((a, b) =>
 		a.repository.path < b.repository.path
 			? -1
@@ -106,7 +96,7 @@ export function present(batch: Batch, invocation: Invocation, color = false) {
 						summary.returned,
 						statuses.map(
 							(status) =>
-								`${paintStatus(status.toUpperCase() as keyof typeof palette)} ${summary[status]}`,
+								`${paintStatus(status.toUpperCase() as Finding["status"])} ${summary[status]}`,
 						),
 					),
 					invocation.lang === "ja"
