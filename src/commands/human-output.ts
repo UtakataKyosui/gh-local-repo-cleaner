@@ -3,6 +3,7 @@ import type { Finding, ReasonCode } from "../core/diagnosis.ts";
 import type { Assessment } from "../model/assessment.ts";
 import type { Invocation } from "./arguments.ts";
 import { reasonAction, reasonDetail, text } from "./messages.ts";
+import { createPainter } from "./palette.ts";
 
 // Quote every path component: whitespace, controls and tree glyphs cannot forge rows.
 const quote = (value: string) =>
@@ -106,10 +107,7 @@ export function humanOutput(
 ) {
 	const ja = invocation.lang === "ja";
 	const labels = text(invocation.lang);
-	const paint = (status: Finding["status"], value: string) =>
-		color
-			? `\x1b[1;${{ SAFE: 32, DIRTY: 33, PROTECTED: 31, UNKNOWN: 35 }[status]}m${value}\x1b[0m`
-			: value;
+	const paint = createPainter(color);
 	const row = (repo: Assessment, name: string) =>
 		`${name} [${paint(repo.status, repo.status)}] ${formatSize(repo.metadata.size_bytes, ja)}`;
 	const lines = [...summary, ""];
