@@ -31,6 +31,7 @@
 		"@crustjs/core": "0.5.6",
 		"@crustjs/effect": "0.2.3",
 		"@crustjs/extensions": "0.5.6",
+		"@crustjs/style": "0.3.6",
 		"effect": "4.0.6"
 	},
 	"devDependencies": {
