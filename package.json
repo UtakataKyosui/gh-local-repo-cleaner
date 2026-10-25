@@ -10,7 +10,10 @@
 	},
 	"crust": {
 		"runtime": "bun",
-		"artifact": "binary"
+		"artifact": "binary",
+		"bunPlugins": [
+			"./build/optional-platform-stub.ts"
+		]
 	},
 	"bin": {
 		"gh-local-repo-cleaner": "src/cli.ts"
