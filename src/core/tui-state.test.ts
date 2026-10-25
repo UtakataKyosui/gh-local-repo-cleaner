@@ -1,7 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TrashStore } from "./trash.ts";
 import {
 	mergeTuiState,
 	sanitizeTuiState,
@@ -14,7 +23,10 @@ afterEach(async () => {
 	await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true })));
 });
 async function temp() {
-	const dir = await mkdtemp(join(tmpdir(), "cleaner-tui-state-"));
+	// The trash store compares real paths, and tmpdir() is a symlink on macOS.
+	const dir = await realpath(
+		await mkdtemp(join(tmpdir(), "cleaner-tui-state-")),
+	);
 	dirs.push(dir);
 	return dir;
 }
@@ -78,4 +90,14 @@ test("flags override saved values and unset flags keep them", () => {
 			{ status: "safe", lang: undefined },
 		),
 	).toEqual({ target: "/a", status: "safe", lang: "ja" });
+});
+
+test("saving creates a private directory the trash store still accepts", async () => {
+	const dir = join(await temp(), "state");
+	await tuiStateStore(dir).save({ lang: "ja" });
+	expect((await stat(dir)).mode & 0o777).toBe(0o700);
+	expect((await stat(join(dir, `${tuiStateName}.json`))).mode & 0o777).toBe(
+		0o600,
+	);
+	expect((await new TrashStore(dir).list()).entries).toEqual([]);
 });

@@ -325,6 +325,7 @@ test("Crust dispatches normalized argv via official Effect service and separates
 			});
 		},
 		operate: () => Effect.die("Unexpected operation"),
+		interact: () => Effect.die("Unexpected interaction"),
 	});
 	const code = await runCli(
 		["list", "--json", "--status", "safe"],
@@ -420,6 +421,7 @@ test("cancellation propagates through Crust and returns 130", async () => {
 	const fake = Layer.succeed(Application, {
 		diagnose: () => Effect.never,
 		operate: () => Effect.never,
+		interact: () => Effect.never,
 	});
 	const pending = runCli(
 		["scan"],
@@ -443,7 +445,11 @@ async function runFake(
 			stdout: (text) => stdout.push(text),
 			stderr: (text) => stderr.push(text),
 		},
-		Layer.succeed(Application, { diagnose, operate: () => Effect.never }),
+		Layer.succeed(Application, {
+			diagnose,
+			operate: () => Effect.never,
+			interact: () => Effect.never,
+		}),
 	);
 	return { code, stdout: stdout.join("\n"), stderr: stderr.join("\n") };
 }
@@ -547,6 +553,7 @@ test("cancellation during inspect returns 130", async () => {
 		Layer.succeed(Application, {
 			diagnose: () => Effect.never,
 			operate: () => Effect.never,
+			interact: () => Effect.never,
 		}),
 		controller.signal,
 	);

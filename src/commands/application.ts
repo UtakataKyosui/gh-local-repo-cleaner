@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import pkg from "../../package.json" with { type: "json" };
 import {
 	type Invocation,
+	nonInteractiveTui,
 	normalizeArguments,
 	UsageError,
 } from "./arguments.ts";
@@ -29,6 +30,8 @@ interface IO {
 	readonly stdout: (text: string) => void;
 	readonly stderr: (text: string) => void;
 	readonly color?: boolean;
+	// stdin and stdout are both terminals; the TUI refuses to start otherwise.
+	readonly interactive?: boolean;
 }
 
 export async function runCli(
@@ -58,6 +61,11 @@ export async function runCli(
 				if (!directory?.isDirectory())
 					throw new UsageError("Unknown command or directory");
 			}
+			if (
+				commandTable[invocation.operation].run === "interactive" &&
+				!io.interactive
+			)
+				throw new UsageError(nonInteractiveTui);
 		} catch (error) {
 			if (!(error instanceof UsageError)) throw error;
 			io.stderr(localizeUsage(peekLocale(argv), error.message));
@@ -96,7 +104,11 @@ export async function runCli(
 			if (output.stderr) io.stderr(output.stderr);
 			code = code || output.exitCode;
 		} else {
-			const result = yield* service.operate(invocation).pipe(
+			const run =
+				commandTable[invocation.operation].run === "interactive"
+					? service.interact
+					: service.operate;
+			const result = yield* run(invocation).pipe(
 				Effect.map((message) => ({
 					message,
 					output: "",
@@ -119,7 +131,7 @@ export async function runCli(
 				code = result.usage ? 2 : 1;
 				if (result.output) io.stdout(result.output);
 				io.stderr(result.message);
-			} else io.stdout(result.message);
+			} else if (result.message) io.stdout(result.message);
 		}
 	});
 	const configure = (command: object, spec: CommandSpec): never => {

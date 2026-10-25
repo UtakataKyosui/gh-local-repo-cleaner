@@ -17,10 +17,17 @@ export interface Invocation {
 	readonly status?: "safe" | "dirty" | "protected" | "unknown";
 	readonly groupBy?: "language";
 	readonly lang: Locale;
+	// lang falls back to en, so the TUI needs this to let a saved language win.
+	readonly langGiven: boolean;
 	readonly config?: string;
 	readonly stateDir?: string;
+	// Set only by the TUI: clean considers just these repository paths.
+	readonly only?: readonly string[];
 }
 export class UsageError extends Error {}
+
+export const nonInteractiveTui =
+	"tui requires an interactive terminal; use scan, list, inspect, clean, trash list or restore instead";
 
 function isOperation(value: string | undefined): value is Operation {
 	return value !== undefined && Object.hasOwn(commandTable, value);
@@ -108,6 +115,7 @@ export function normalizeArguments(argv: readonly string[]): Invocation {
 		status: flags.get("status") as Invocation["status"],
 		groupBy: flags.get("group-by") as Invocation["groupBy"],
 		lang: (flags.get("lang") ?? "en") as Locale,
+		langGiven: flags.has("lang"),
 		config: flags.get("config") as string | undefined,
 		stateDir: flags.get("state-dir") as string | undefined,
 	};

@@ -6,7 +6,7 @@ import { reasonAction, reasonDetail, text } from "./messages.ts";
 import { createPainter } from "./palette.ts";
 
 // Quote every path component: whitespace, controls and tree glyphs cannot forge rows.
-const quote = (value: string) =>
+export const quote = (value: string) =>
 	JSON.stringify(value).replace(
 		/[\p{Cf}\u007f-\u009f\u2028\u2029]/gu,
 		(c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
@@ -101,7 +101,7 @@ function compact(reasons: readonly Finding[], ja: boolean) {
 
 export function humanOutput(
 	repositories: readonly Assessment[],
-	invocation: Invocation,
+	invocation: Pick<Invocation, "operation" | "groupBy" | "lang">,
 	summary: string[],
 	color: boolean,
 ) {

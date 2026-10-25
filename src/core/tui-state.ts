@@ -53,10 +53,12 @@ export function mergeTuiState(saved: TuiState, flags: TuiState): TuiState {
 
 // dirPath must be absolute; tests pass a temporary directory.
 export function tuiStateStore(dirPath: string) {
+	// The trash store shares this directory and refuses one that others can read.
 	const store = createStore({
 		dirPath,
 		name: tuiStateName,
 		fields,
+		access: "private",
 	});
 	return {
 		// A broken or unreadable file falls back to no saved preferences.
