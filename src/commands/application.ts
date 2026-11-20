@@ -13,6 +13,7 @@ import {
 } from "./arguments.ts";
 import { failureMessage, localizeUsage, peekLocale } from "./messages.ts";
 import { present } from "./output.ts";
+import { presentStorage } from "./storage-output.ts";
 import { Application, ApplicationUnavailable } from "./services.ts";
 import { type CommandSpec, commandTable, flagTable } from "./spec.ts";
 
@@ -99,7 +100,9 @@ export async function runCli(
 					}),
 				),
 			);
-			const output = present(batch, invocation, io.color);
+			const output = invocation.operation === "storage"
+				? presentStorage(batch, invocation)
+				: present(batch, invocation, io.color);
 			io.stdout(output.stdout);
 			if (output.stderr) io.stderr(output.stderr);
 			code = code || output.exitCode;
