@@ -101,6 +101,16 @@ const commands = {
 			lang: { description: "Display language of the text output: en or ja" },
 		},
 	},
+	storage: {
+		description: "Rank repositories by local disk usage (read-only)",
+		run: "diagnose",
+		target: {
+			name: "directory",
+			description: "Directory whose direct children are analyzed (default: ghq)",
+			required: false,
+		},
+		flags: { json: {}, ghq: {}, config: {}, lang: {} },
+	},
 	list: {
 		description: "List diagnosed repositories (read-only)",
 		run: "diagnose",
